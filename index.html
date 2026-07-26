@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Painel de Investimentos</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:#fff; color:#1f1f1f; max-width:900px; margin:0 auto; padding:24px; }
+  h1 { font-size:20px; font-weight:600; display:flex; align-items:center; gap:8px; margin-bottom:2px; }
+  .subtitle { font-size:13px; color:#777; margin-bottom:20px; }
+  .tabs { display:flex; gap:8px; border-bottom:1px solid #e5e5e5; margin-bottom:20px; flex-wrap:wrap; }
+  .tab { padding:8px 16px; font-size:14px; font-weight:500; color:#777; background:none; border:none; border-bottom:2px solid transparent; cursor:pointer; margin-bottom:-1px; }
+  .tab.active { color:#0F6E56; border-bottom-color:#0F6E56; }
+  .summary { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
+  .card { background:#f7f7f5; border-radius:10px; padding:16px; }
+  .card .label { font-size:12px; color:#777; }
+  .card .value { font-size:24px; font-weight:600; margin-top:4px; }
+  .card .hint { font-size:12px; color:#aaa; margin-top:4px; }
+  .chart-box { height:130px; }
+  form { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; align-items:end; background:#f7f7f5; padding:12px; border-radius:10px; margin-bottom:20px; }
+  label { font-size:12px; color:#777; display:block; margin-bottom:4px; }
+  input, select { width:100%; font-size:14px; padding:6px 8px; border:1px solid #ccc; border-radius:6px; }
+  button.add { background:#0F6E56; color:#fff; border:none; border-radius:6px; padding:7px 10px; font-size:14px; cursor:pointer; }
+  button.add:hover { background:#0b5a46; }
+  table { width:100%; border-collapse:collapse; font-size:14px; margin-bottom:20px; }
+  th { text-align:left; font-weight:400; font-size:12px; color:#999; border-bottom:1px solid #e5e5e5; padding:6px 4px; }
+  td { padding:6px 4px; border-bottom:1px solid #f0f0f0; }
+  .right { text-align:right; }
+  .empty { text-align:center; color:#aaa; font-size:14px; padding:32px 0; }
+  .del { background:none; border:none; color:#ccc; cursor:pointer; font-size:14px; }
+  .del:hover { color:#c0392b; }
+  .toggle-hist { background:none; border:none; color:#888; font-size:12px; cursor:pointer; margin-bottom:8px; }
+  .save-error { background:#fdecec; color:#c0392b; border:1px solid #f4c2c2; padding:8px; border-radius:6px; font-size:13px; margin-bottom:16px; }
+  .status { font-size:12px; color:#aaa; margin-bottom:16px; }
+  .config-warning { background:#fff8e1; color:#8a6d00; border:1px solid #f0dfa0; padding:12px; border-radius:8px; font-size:13px; margin-bottom:20px; }
+  .config-warning code { background:#fff; padding:1px 5px; border-radius:4px; }
+</style>
+</head>
+<body>
+
+<h1>📈 Painel de investimentos</h1>
+<p class="subtitle" id="subtitle">Lance cada compra do dia. O preço médio de cada ticker é recalculado automaticamente.</p>
+
+<div id="configWarning" class="config-warning" style="display:none;">
+  Antes de usar, cole a URL do seu Apps Script na constante <code>APPS_SCRIPT_URL</code> no início do código deste arquivo.
+</div>
+<div id="status" class="status"></div>
+<div id="saveError" class="save-error" style="display:none;">Não consegui salvar/carregar da planilha agora. Confira sua conexão ou a URL configurada.</div>
+
+<div class="tabs">
+  <button class="tab active" data-tab="BRL">Brasil (R$)</button>
+  <button class="tab" data-tab="USD">EUA (US$)</button>
+  <button class="tab" data-tab="RF">Renda fixa</button>
+  <button class="tab" data-tab="DIV">Dividendos</button>
+</div>
+
+<div class="summary">
+  <div class="card">
+    <div class="label" id="totalLabel">Total investido (custo) em BRL</div>
+    <div class="value" id="totalValue">R$ 0,00</div>
+    <div class="hint" id="totalHint">0 tickers</div>
+  </div>
+  <div class="card chart-box"><canvas id="pieChart"></canvas></div>
+</div>
+
+<div id="compraSection">
+  <form id="formCompra">
+    <div><label>Categoria</label>
+      <select id="f_categoria">
+        <option>Ações BR</option><option>FIIs</option><option>Ações EUA</option><option>REITs</option>
+      </select>
+    </div>
+    <div><label>Ticker</label><input id="f_ticker" placeholder="PETR4"></div>
+    <div><label>Data</label><input type="date" id="f_data"></div>
+    <div><label>Quantidade</label><input type="number" id="f_quantidade" placeholder="100"></div>
+    <div><label>Preço unitário</label><input type="number" step="0.01" id="f_preco" placeholder="32.50"></div>
+    <button type="submit" class="add">+ Add</button>
+  </form>
+  <div id="posicoesWrap"></div>
+  <button class="toggle-hist" id="toggleHist">▾ Histórico de compras</button>
+  <div id="historicoWrap" style="display:none;"></div>
+</div>
+
+<div id="rfSection" style="display:none;">
+  <form id="formRF">
+    <div><label>Tipo</label>
+      <select id="rf_tipo">
+        <option>CDB</option><option>LCI/LCA</option><option>Tesouro Direto</option><option>Debênture</option><option>Outro</option>
+      </select>
+    </div>
+    <div><label>Nome / emissor</label><input id="rf_nome" placeholder="Banco XP"></div>
+    <div><label>Valor aplicado</label><input type="number" step="0.01" id="rf_valor" placeholder="5000"></div>
+    <div><label>Taxa</label><input id="rf_taxa" placeholder="110% CDI"></div>
+    <div><label>Aplicação</label><input type="date" id="rf_dataAplicacao"></div>
+    <div><label>Vencimento</label><input type="date" id="rf_vencimento"></div>
+    <div style="grid-column: span 6;"><button type="submit" class="add" style="width:100%;">+ Adicionar aplicação</button></div>
+  </form>
+  <div id="rfWrap"></div>
+</div>
+
+<div id="divSection" style="display:none;">
+  <form id="formDiv">
+    <div><label>Categoria</label>
+      <select id="d_categoria">
+        <option>Ações BR</option><option>FIIs</option><option>Ações EUA</option><option>REITs</option>
+      </select>
+    </div>
+    <div><label>Ticker</label><input id="d_ticker" placeholder="PETR4"></div>
+    <div><label>Data</label><input type="date" id="d_data"></div>
+    <div><label>Tipo</label>
+      <select id="d_tipo"><option>Dividendo</option><option>JCP</option><option>Rendimento</option></select>
+    </div>
+    <div><label>Valor recebido</label><input type="number" step="0.01" id="d_valor" placeholder="45.30"></div>
+    <button type="submit" class="add">+ Add</button>
+  </form>
+  <div id="divWrap"></div>
+</div>
+
+<script>
+/* ============================================================
+   COLE AQUI A URL DO SEU APPS SCRIPT (termina em /exec)
+   ============================================================ */
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxYICE4YjDRFylmU6oKTi980edV10ulmIY1Da5dVvgTp4UZVcQ8Qekd3ai29y8SbgPA7A/exec";
+/* ============================================================ */
+
+const CATEGORIES = {
+  "Ações BR": { moeda: "BRL", cor: "#0F6E56" },
+  "FIIs": { moeda: "BRL", cor: "#639922" },
+  "Ações EUA": { moeda: "USD", cor: "#185FA5" },
+  "REITs": { moeda: "USD", cor: "#7F77DD" },
+};
+const CORES_RF = { "CDB": "#0F6E56", "LCI/LCA": "#639922", "Tesouro Direto": "#185FA5", "Debênture": "#7F77DD", "Outro": "#888780" };
+
+let compras = [];
+let rendaFixa = [];
+let dividendos = [];
+let tab = "BRL";
+let historicoAberto = false;
+let chart = null;
+
+function hoje(){ return new Date().toISOString().slice(0,10); }
+function fmt(v, moeda){
+  return new Intl.NumberFormat(moeda === "USD" ? "en-US" : "pt-BR", { style:"currency", currency: moeda }).format(v || 0);
+}
+function showSaveError(on){ document.getElementById("saveError").style.display = on ? "block" : "none"; }
+function setStatus(txt){ document.getElementById("status").textContent = txt; }
+
+async function loadFromSheet(){
+  if(APPS_SCRIPT_URL.includes("COLE_SUA_URL_AQUI")){
+    document.getElementById("configWarning").style.display = "block";
+    return;
+  }
+  setStatus("Carregando da planilha...");
+  try{
+    const res = await fetch(APPS_SCRIPT_URL);
+    const data = await res.json();
+    compras = (data.compras || []).map(c => ({ ...c, quantidade: Number(c.quantidade), preco: Number(c.preco) }));
+    rendaFixa = (data.rendaFixa || []).map(r => ({ ...r, valor: Number(r.valor) }));
+    dividendos = (data.dividendos || []).map(d => ({ ...d, valor: Number(d.valor) }));
+    showSaveError(false);
+    setStatus("Sincronizado com a planilha.");
+  }catch(e){
+    showSaveError(true);
+    setStatus("");
+  }
+  render();
+}
+
+async function saveToSheet(){
+  if(APPS_SCRIPT_URL.includes("COLE_SUA_URL_AQUI")) return;
+  setStatus("Salvando...");
+  try{
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ compras, rendaFixa, dividendos })
+    });
+    const text = await res.text();
+    let ok = false;
+    try { ok = JSON.parse(text).ok === true; } catch(parseErr) { ok = false; }
+    if(!ok){
+      console.error("Resposta inesperada do Apps Script ao salvar:", res.status, text);
+      throw new Error("Resposta inesperada: " + text.slice(0, 200));
+    }
+    showSaveError(false);
+    setStatus("Salvo na planilha ✓");
+  }catch(e){
+    console.error("Erro ao salvar na planilha:", e);
+    showSaveError(true);
+    setStatus("");
+  }
+}
+
+function agregarPorTicker(lista){
+  const mapa = {};
+  lista.forEach(c => {
+    const chave = c.categoria + "|" + c.ticker;
+    if(!mapa[chave]) mapa[chave] = { categoria:c.categoria, ticker:c.ticker, quantidade:0, custoTotal:0 };
+    mapa[chave].quantidade += c.quantidade;
+    mapa[chave].custoTotal += c.quantidade * c.preco;
+  });
+  return Object.values(mapa).map(p => ({ ...p, precoMedio: p.quantidade > 0 ? p.custoTotal / p.quantidade : 0 }));
+}
+
+function render(){
+  document.querySelectorAll(".tab").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+  document.getElementById("compraSection").style.display = tab === "BRL" || tab === "USD" ? "block" : "none";
+  document.getElementById("rfSection").style.display = tab === "RF" ? "block" : "none";
+  document.getElementById("divSection").style.display = tab === "DIV" ? "block" : "none";
+
+  const subtitles = {
+    BRL: "Lance cada compra do dia. O preço médio de cada ticker é recalculado automaticamente.",
+    USD: "Lance cada compra do dia. O preço médio de cada ticker é recalculado automaticamente.",
+    RF: "Suas aplicações de renda fixa.",
+    DIV: "Proventos recebidos: dividendos, JCP e rendimentos de FIIs/REITs."
+  };
+  document.getElementById("subtitle").textContent = subtitles[tab];
+
+  let dadosGrafico = [];
+
+  if(tab === "RF"){
+    document.getElementById("totalLabel").textContent = "Total aplicado em renda fixa";
+    const total = rendaFixa.reduce((a,r) => a + r.valor, 0);
+    document.getElementById("totalValue").textContent = fmt(total, "BRL");
+    document.getElementById("totalHint").textContent = rendaFixa.length + " aplicação(ões)";
+    dadosGrafico = Object.keys(CORES_RF).map(t => ({
+      nome: t, valor: rendaFixa.filter(r => r.tipo === t).reduce((a,r) => a+r.valor,0), cor: CORES_RF[t]
+    })).filter(d => d.valor > 0);
+    renderRF();
+  } else if(tab === "DIV"){
+    document.getElementById("totalLabel").textContent = "Total recebido em proventos";
+    const total = dividendos.reduce((a,d) => a + d.valor, 0);
+    document.getElementById("totalValue").textContent = fmt(total, "BRL");
+    document.getElementById("totalHint").textContent = dividendos.length + " recebimento(s)";
+    dadosGrafico = Object.keys(CATEGORIES).map(nome => ({
+      nome, valor: dividendos.filter(d => d.categoria === nome).reduce((a,d)=>a+d.valor,0), cor: CATEGORIES[nome].cor
+    })).filter(d => d.valor > 0);
+    renderDiv();
+  } else {
+    const comprasDaMoeda = compras.filter(c => CATEGORIES[c.categoria]?.moeda === tab);
+    const posicoes = agregarPorTicker(comprasDaMoeda);
+    const total = posicoes.reduce((a,p) => a + p.custoTotal, 0);
+    document.getElementById("totalLabel").textContent = "Total investido (custo) em " + tab;
+    document.getElementById("totalValue").textContent = fmt(total, tab);
+    document.getElementById("totalHint").textContent = posicoes.length + " ticker(s)";
+    dadosGrafico = Object.keys(CATEGORIES).filter(c => CATEGORIES[c].moeda === tab).map(nome => ({
+      nome, valor: posicoes.filter(p => p.categoria === nome).reduce((a,p)=>a+p.custoTotal,0), cor: CATEGORIES[nome].cor
+    })).filter(d => d.valor > 0);
+    renderPosicoes(posicoes);
+    renderHistorico(comprasDaMoeda);
+  }
+  renderChart(dadosGrafico, tab);
+}
+
+function renderChart(dados, moedaTab){
+  const ctx = document.getElementById("pieChart");
+  if(chart) chart.destroy();
+  if(dados.length === 0){
+    ctx.getContext("2d").clearRect(0,0,ctx.width,ctx.height);
+    return;
+  }
+  const moeda = moedaTab === "USD" ? "USD" : "BRL";
+  chart = new Chart(ctx, {
+    type: "doughnut",
+    data: { labels: dados.map(d=>d.nome), datasets:[{ data: dados.map(d=>d.valor), backgroundColor: dados.map(d=>d.cor) }] },
+    options: { plugins:{ legend:{ position:"right", labels:{ font:{size:11} } },
+      tooltip:{ callbacks:{ label: (c) => c.label + ": " + fmt(c.parsed, moeda) } } } }
+  });
+}
+
+function renderPosicoes(posicoes){
+  const wrap = document.getElementById("posicoesWrap");
+  if(posicoes.length === 0){
+    wrap.innerHTML = '<div class="empty">Nenhuma compra em ' + tab + ' ainda. Lance a primeira acima.</div>';
+    return;
+  }
+  let html = '<h3 style="font-size:14px; font-weight:500; margin-bottom:8px;">Posições consolidadas</h3><table><thead><tr>' +
+    '<th>Ticker</th><th>Categoria</th><th class="right">Qtd total</th><th class="right">Preço médio</th><th class="right">Custo total</th></tr></thead><tbody>';
+  posicoes.forEach(p => {
+    html += '<tr><td><b>' + p.ticker + '</b></td><td>' + p.categoria + '</td><td class="right">' + p.quantidade +
+      '</td><td class="right">' + fmt(p.precoMedio, tab) + '</td><td class="right">' + fmt(p.custoTotal, tab) + '</td></tr>';
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+function renderHistorico(lista){
+  const btn = document.getElementById("toggleHist");
+  const wrap = document.getElementById("historicoWrap");
+  btn.textContent = (historicoAberto ? "▴ " : "▾ ") + "Histórico de compras (" + lista.length + ")";
+  btn.style.display = lista.length ? "inline-block" : "none";
+  if(!historicoAberto || lista.length === 0){ wrap.innerHTML = ""; wrap.style.display = "none"; return; }
+  wrap.style.display = "block";
+  const ordenado = [...lista].sort((a,b) => a.data < b.data ? 1 : -1);
+  let html = '<table><thead><tr><th>Data</th><th>Ticker</th><th class="right">Qtd</th><th class="right">Preço</th><th></th></tr></thead><tbody>';
+  ordenado.forEach(c => {
+    html += '<tr><td>' + c.data + '</td><td>' + c.ticker + '</td><td class="right">' + c.quantidade +
+      '</td><td class="right">' + fmt(c.preco, tab) + '</td><td class="right"><button class="del" data-id="' + c.id + '">✕</button></td></tr>';
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+  wrap.querySelectorAll(".del").forEach(b => b.addEventListener("click", async () => {
+    compras = compras.filter(c => c.id !== b.dataset.id);
+    render(); await saveToSheet();
+  }));
+}
+
+function renderRF(){
+  const wrap = document.getElementById("rfWrap");
+  if(rendaFixa.length === 0){
+    wrap.innerHTML = '<div class="empty">Nenhuma aplicação em renda fixa ainda.</div>';
+    return;
+  }
+  const ordenado = [...rendaFixa].sort((a,b) => a.dataAplicacao < b.dataAplicacao ? 1 : -1);
+  let html = '<table><thead><tr><th>Tipo</th><th>Nome</th><th class="right">Valor</th><th>Taxa</th><th>Vencimento</th><th></th></tr></thead><tbody>';
+  ordenado.forEach(r => {
+    html += '<tr><td>' + r.tipo + '</td><td><b>' + r.nome + '</b></td><td class="right">' + fmt(r.valor,"BRL") +
+      '</td><td>' + (r.taxa || "—") + '</td><td>' + (r.vencimento || "—") + '</td><td class="right"><button class="del" data-id="' + r.id + '">✕</button></td></tr>';
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+  wrap.querySelectorAll(".del").forEach(b => b.addEventListener("click", async () => {
+    rendaFixa = rendaFixa.filter(r => r.id !== b.dataset.id);
+    render(); await saveToSheet();
+  }));
+}
+
+function renderDiv(){
+  const wrap = document.getElementById("divWrap");
+  if(dividendos.length === 0){
+    wrap.innerHTML = '<div class="empty">Nenhum provento lançado ainda.</div>';
+    return;
+  }
+  const ordenado = [...dividendos].sort((a,b) => a.data < b.data ? 1 : -1);
+  let html = '<table><thead><tr><th>Data</th><th>Categoria</th><th>Ticker</th><th>Tipo</th><th class="right">Valor</th><th></th></tr></thead><tbody>';
+  ordenado.forEach(d => {
+    html += '<tr><td>' + d.data + '</td><td>' + d.categoria + '</td><td><b>' + d.ticker + '</b></td><td>' + d.tipo +
+      '</td><td class="right">' + fmt(d.valor, CATEGORIES[d.categoria]?.moeda === "USD" ? "USD" : "BRL") +
+      '</td><td class="right"><button class="del" data-id="' + d.id + '">✕</button></td></tr>';
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+  wrap.querySelectorAll(".del").forEach(b => b.addEventListener("click", async () => {
+    dividendos = dividendos.filter(d => d.id !== b.dataset.id);
+    render(); await saveToSheet();
+  }));
+}
+
+document.querySelectorAll(".tab").forEach(b => b.addEventListener("click", () => { tab = b.dataset.tab; render(); }));
+document.getElementById("toggleHist").addEventListener("click", () => { historicoAberto = !historicoAberto; render(); });
+
+document.getElementById("f_data").value = hoje();
+document.getElementById("formCompra").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const ticker = document.getElementById("f_ticker").value.trim().toUpperCase();
+  const quantidade = parseFloat(document.getElementById("f_quantidade").value);
+  const preco = parseFloat(document.getElementById("f_preco").value);
+  if(!ticker || !quantidade || !preco) return;
+  compras.push({
+    id: Date.now().toString(), categoria: document.getElementById("f_categoria").value,
+    ticker, data: document.getElementById("f_data").value, quantidade, preco
+  });
+  document.getElementById("f_ticker").value = ""; document.getElementById("f_quantidade").value = ""; document.getElementById("f_preco").value = "";
+  render();
+  await saveToSheet();
+});
+
+document.getElementById("rf_dataAplicacao").value = hoje();
+document.getElementById("formRF").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const nome = document.getElementById("rf_nome").value.trim();
+  const valor = parseFloat(document.getElementById("rf_valor").value);
+  if(!nome || !valor) return;
+  rendaFixa.push({
+    id: Date.now().toString(), tipo: document.getElementById("rf_tipo").value, nome, valor,
+    taxa: document.getElementById("rf_taxa").value, dataAplicacao: document.getElementById("rf_dataAplicacao").value,
+    vencimento: document.getElementById("rf_vencimento").value
+  });
+  document.getElementById("rf_nome").value = ""; document.getElementById("rf_valor").value = ""; document.getElementById("rf_taxa").value = ""; document.getElementById("rf_vencimento").value = "";
+  render();
+  await saveToSheet();
+});
+
+document.getElementById("d_data").value = hoje();
+document.getElementById("formDiv").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const ticker = document.getElementById("d_ticker").value.trim().toUpperCase();
+  const valor = parseFloat(document.getElementById("d_valor").value);
+  if(!ticker || !valor) return;
+  dividendos.push({
+    id: Date.now().toString(), categoria: document.getElementById("d_categoria").value, ticker,
+    data: document.getElementById("d_data").value, tipo: document.getElementById("d_tipo").value, valor
+  });
+  document.getElementById("d_ticker").value = ""; document.getElementById("d_valor").value = "";
+  render();
+  await saveToSheet();
+});
+
+render();
+loadFromSheet();
+</script>
+</body>
+</html>
