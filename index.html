@@ -4,38 +4,54 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Painel de Investimentos</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 <style>
   * { box-sizing: border-box; }
   body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:#fff; color:#1f1f1f; max-width:900px; margin:0 auto; padding:24px; }
   h1 { font-size:20px; font-weight:600; display:flex; align-items:center; gap:8px; margin-bottom:2px; }
+  h3 { font-size:14px; font-weight:500; margin:0 0 8px; }
   .subtitle { font-size:13px; color:#777; margin-bottom:20px; }
   .tabs { display:flex; gap:8px; border-bottom:1px solid #e5e5e5; margin-bottom:20px; flex-wrap:wrap; }
   .tab { padding:8px 16px; font-size:14px; font-weight:500; color:#777; background:none; border:none; border-bottom:2px solid transparent; cursor:pointer; margin-bottom:-1px; }
   .tab.active { color:#0F6E56; border-bottom-color:#0F6E56; }
-  .summary { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
-  .card { background:#f7f7f5; border-radius:10px; padding:16px; }
+  .summary { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:12px; }
+  .card { background:#f7f7f5; border-radius:10px; padding:14px; }
   .card .label { font-size:12px; color:#777; }
-  .card .value { font-size:24px; font-weight:600; margin-top:4px; }
+  .card .value { font-size:20px; font-weight:600; margin-top:4px; }
+  .card .value.pos { color:#0F6E56; }
+  .card .value.neg { color:#c0392b; }
   .card .hint { font-size:12px; color:#aaa; margin-top:4px; }
-  .chart-box { height:130px; }
+  .chart-panel { background:#f7f7f5; border-radius:10px; padding:14px; margin-bottom:20px; }
+  .chart-controls { display:flex; gap:16px; flex-wrap:wrap; align-items:center; margin-bottom:12px; font-size:12px; color:#555; }
+  .chart-controls label { display:flex; align-items:center; gap:5px; cursor:pointer; }
+  .chart-controls select { font-size:12px; padding:3px 6px; border-radius:5px; border:1px solid #ccc; }
+  .chart-box { display:flex; align-items:center; gap:14px; min-height:130px; }
+  .chart-legend { font-size:11px; color:#555; display:flex; flex-direction:column; gap:4px; }
+  .chart-legend .item { display:flex; align-items:center; gap:5px; }
+  .chart-legend .dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
   form { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; align-items:end; background:#f7f7f5; padding:12px; border-radius:10px; margin-bottom:20px; }
   label { font-size:12px; color:#777; display:block; margin-bottom:4px; }
   input, select { width:100%; font-size:14px; padding:6px 8px; border:1px solid #ccc; border-radius:6px; }
   button.add { background:#0F6E56; color:#fff; border:none; border-radius:6px; padding:7px 10px; font-size:14px; cursor:pointer; }
   button.add:hover { background:#0b5a46; }
+  button.add.editing { background:#185FA5; }
+  button.cancel-edit { background:none; border:1px solid #ccc; border-radius:6px; padding:7px 10px; font-size:13px; color:#666; cursor:pointer; }
   table { width:100%; border-collapse:collapse; font-size:14px; margin-bottom:20px; }
   th { text-align:left; font-weight:400; font-size:12px; color:#999; border-bottom:1px solid #e5e5e5; padding:6px 4px; }
   td { padding:6px 4px; border-bottom:1px solid #f0f0f0; }
   .right { text-align:right; }
+  .pos { color:#0F6E56; }
+  .neg { color:#c0392b; }
+  .muted { color:#aaa; }
   .empty { text-align:center; color:#aaa; font-size:14px; padding:32px 0; }
-  .del { background:none; border:none; color:#ccc; cursor:pointer; font-size:14px; }
+  .del, .edit { background:none; border:none; color:#ccc; cursor:pointer; font-size:14px; padding:0 3px; }
   .del:hover { color:#c0392b; }
+  .edit:hover { color:#185FA5; }
   .toggle-hist { background:none; border:none; color:#888; font-size:12px; cursor:pointer; margin-bottom:8px; }
   .save-error { background:#fdecec; color:#c0392b; border:1px solid #f4c2c2; padding:8px; border-radius:6px; font-size:13px; margin-bottom:16px; }
   .status { font-size:12px; color:#aaa; margin-bottom:16px; }
   .config-warning { background:#fff8e1; color:#8a6d00; border:1px solid #f0dfa0; padding:12px; border-radius:8px; font-size:13px; margin-bottom:20px; }
   .config-warning code { background:#fff; padding:1px 5px; border-radius:4px; }
+  .subsection { margin-bottom:24px; }
 </style>
 </head>
 <body>
@@ -56,17 +72,16 @@
   <button class="tab" data-tab="DIV">Dividendos</button>
 </div>
 
-<div class="summary">
-  <div class="card">
-    <div class="label" id="totalLabel">Total investido (custo) em BRL</div>
-    <div class="value" id="totalValue">R$ 0,00</div>
-    <div class="hint" id="totalHint">0 tickers</div>
-  </div>
-  <div class="card chart-box"><canvas id="pieChart"></canvas></div>
+<div id="summaryWrap"></div>
+
+<div class="chart-panel">
+  <div class="chart-controls" id="chartControls"></div>
+  <div class="chart-box" id="pieChartWrap"></div>
 </div>
 
 <div id="compraSection">
   <form id="formCompra">
+    <input type="hidden" id="f_id">
     <div><label>Categoria</label>
       <select id="f_categoria">
         <option>Ações BR</option><option>FIIs</option><option>Ações EUA</option><option>REITs</option>
@@ -76,7 +91,10 @@
     <div><label>Data</label><input type="date" id="f_data"></div>
     <div><label>Quantidade</label><input type="number" id="f_quantidade" placeholder="100"></div>
     <div><label>Preço unitário</label><input type="number" step="0.01" id="f_preco" placeholder="32.50"></div>
-    <button type="submit" class="add">+ Add</button>
+    <div style="display:flex; gap:6px;">
+      <button type="submit" class="add" id="f_submitBtn">+ Add</button>
+      <button type="button" class="cancel-edit" id="f_cancelBtn" style="display:none;">Cancelar</button>
+    </div>
   </form>
   <div id="posicoesWrap"></div>
   <button class="toggle-hist" id="toggleHist">▾ Histórico de compras</button>
@@ -85,6 +103,7 @@
 
 <div id="rfSection" style="display:none;">
   <form id="formRF">
+    <input type="hidden" id="rf_id">
     <div><label>Tipo</label>
       <select id="rf_tipo">
         <option>CDB</option><option>LCI/LCA</option><option>Tesouro Direto</option><option>Debênture</option><option>Outro</option>
@@ -95,13 +114,17 @@
     <div><label>Taxa</label><input id="rf_taxa" placeholder="110% CDI"></div>
     <div><label>Aplicação</label><input type="date" id="rf_dataAplicacao"></div>
     <div><label>Vencimento</label><input type="date" id="rf_vencimento"></div>
-    <div style="grid-column: span 6;"><button type="submit" class="add" style="width:100%;">+ Adicionar aplicação</button></div>
+    <div style="grid-column: span 6; display:flex; gap:6px;">
+      <button type="submit" class="add" id="rf_submitBtn" style="flex:1;">+ Adicionar aplicação</button>
+      <button type="button" class="cancel-edit" id="rf_cancelBtn" style="display:none;">Cancelar</button>
+    </div>
   </form>
   <div id="rfWrap"></div>
 </div>
 
 <div id="divSection" style="display:none;">
   <form id="formDiv">
+    <input type="hidden" id="d_id">
     <div><label>Categoria</label>
       <select id="d_categoria">
         <option>Ações BR</option><option>FIIs</option><option>Ações EUA</option><option>REITs</option>
@@ -113,9 +136,22 @@
       <select id="d_tipo"><option>Dividendo</option><option>JCP</option><option>Rendimento</option></select>
     </div>
     <div><label>Valor recebido</label><input type="number" step="0.01" id="d_valor" placeholder="45.30"></div>
-    <button type="submit" class="add">+ Add</button>
+    <div style="display:flex; gap:6px;">
+      <button type="submit" class="add" id="d_submitBtn">+ Add</button>
+      <button type="button" class="cancel-edit" id="d_cancelBtn" style="display:none;">Cancelar</button>
+    </div>
   </form>
-  <div id="divWrap"></div>
+
+  <div class="subsection">
+    <h3>Acumulado no ano por ativo</h3>
+    <div id="divPorAtivoWrap"></div>
+  </div>
+  <div class="subsection">
+    <h3>Total recebido por mês</h3>
+    <div id="divPorMesWrap"></div>
+  </div>
+  <button class="toggle-hist" id="toggleDivHist">▾ Histórico completo de proventos</button>
+  <div id="divWrap" style="display:none;"></div>
 </div>
 
 <script>
@@ -132,20 +168,33 @@ const CATEGORIES = {
   "REITs": { moeda: "USD", cor: "#7F77DD" },
 };
 const CORES_RF = { "CDB": "#0F6E56", "LCI/LCA": "#639922", "Tesouro Direto": "#185FA5", "Debênture": "#7F77DD", "Outro": "#888780" };
+const COR_RF_SLICE = "#c98a2c";
+const COR_DIV_SLICE = "#e07a5f";
+const PALETA_TICKERS = ["#0F6E56","#639922","#185FA5","#7F77DD","#c98a2c","#e07a5f","#a13d63","#3a6ea5","#88a65e","#c85c5c"];
 
 let compras = [];
 let rendaFixa = [];
 let dividendos = [];
+let cotacoes = {};
 let tab = "BRL";
 let historicoAberto = false;
-let chart = null;
+let divHistoricoAberto = false;
+let agruparPor = "categoria"; // "categoria" | "ticker"
+let incluirRF = false;
+let incluirDividendos = false;
+let editando = { tipo: null, id: null }; // tipo: 'compra' | 'rf' | 'div'
 
 function hoje(){ return new Date().toISOString().slice(0,10); }
 function fmt(v, moeda){
   return new Intl.NumberFormat(moeda === "USD" ? "en-US" : "pt-BR", { style:"currency", currency: moeda }).format(v || 0);
 }
+function fmtPct(v){
+  if(v === null || v === undefined || isNaN(v)) return "—";
+  return (v >= 0 ? "+" : "") + v.toFixed(1) + "%";
+}
 function showSaveError(on){ document.getElementById("saveError").style.display = on ? "block" : "none"; }
 function setStatus(txt){ document.getElementById("status").textContent = txt; }
+function corParaTicker(ticker, indice){ return PALETA_TICKERS[indice % PALETA_TICKERS.length]; }
 
 async function loadFromSheet(){
   if(APPS_SCRIPT_URL.includes("COLE_SUA_URL_AQUI")){
@@ -159,9 +208,11 @@ async function loadFromSheet(){
     compras = (data.compras || []).map(c => ({ ...c, quantidade: Number(c.quantidade), preco: Number(c.preco) }));
     rendaFixa = (data.rendaFixa || []).map(r => ({ ...r, valor: Number(r.valor) }));
     dividendos = (data.dividendos || []).map(d => ({ ...d, valor: Number(d.valor) }));
+    cotacoes = data.cotacoes || {};
     showSaveError(false);
     setStatus("Sincronizado com a planilha.");
   }catch(e){
+    console.error(e);
     showSaveError(true);
     setStatus("");
   }
@@ -180,12 +231,9 @@ async function saveToSheet(){
     const text = await res.text();
     let ok = false;
     try { ok = JSON.parse(text).ok === true; } catch(parseErr) { ok = false; }
-    if(!ok){
-      console.error("Resposta inesperada do Apps Script ao salvar:", res.status, text);
-      throw new Error("Resposta inesperada: " + text.slice(0, 200));
-    }
+    if(!ok) throw new Error("Resposta inesperada: " + text.slice(0,200));
     showSaveError(false);
-    setStatus("Salvo na planilha ✓");
+    setStatus("Salvo na planilha ✓ (cotações atualizam ao recarregar)");
   }catch(e){
     console.error("Erro ao salvar na planilha:", e);
     showSaveError(true);
@@ -201,12 +249,21 @@ function agregarPorTicker(lista){
     mapa[chave].quantidade += c.quantidade;
     mapa[chave].custoTotal += c.quantidade * c.preco;
   });
-  return Object.values(mapa).map(p => ({ ...p, precoMedio: p.quantidade > 0 ? p.custoTotal / p.quantidade : 0 }));
+  return Object.values(mapa).map(p => {
+    const precoAtual = cotacoes[p.ticker] || null;
+    const precoMedio = p.quantidade > 0 ? p.custoTotal / p.quantidade : 0;
+    const valorAtual = precoAtual !== null ? p.quantidade * precoAtual : null;
+    const ganho = valorAtual !== null ? valorAtual - p.custoTotal : null;
+    const ganhoPct = (ganho !== null && p.custoTotal > 0) ? (ganho / p.custoTotal) * 100 : null;
+    return { ...p, precoMedio, precoAtual, valorAtual, ganho, ganhoPct };
+  });
 }
+
+/* ===================== RENDER PRINCIPAL ===================== */
 
 function render(){
   document.querySelectorAll(".tab").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
-  document.getElementById("compraSection").style.display = tab === "BRL" || tab === "USD" ? "block" : "none";
+  document.getElementById("compraSection").style.display = (tab === "BRL" || tab === "USD") ? "block" : "none";
   document.getElementById("rfSection").style.display = tab === "RF" ? "block" : "none";
   document.getElementById("divSection").style.display = tab === "DIV" ? "block" : "none";
 
@@ -218,94 +275,215 @@ function render(){
   };
   document.getElementById("subtitle").textContent = subtitles[tab];
 
-  let dadosGrafico = [];
+  if(tab === "RF") renderResumoRF();
+  else if(tab === "DIV") renderResumoDiv();
+  else renderResumoCompras();
 
+  renderChartControls();
+  renderChart();
+
+  if(tab === "RF") renderRF();
+  else if(tab === "DIV") { renderDivAcumulados(); renderDiv(); }
+  else { renderPosicoes(); renderHistorico(); }
+}
+
+/* ===================== RESUMOS (cards do topo) ===================== */
+
+function renderResumoCompras(){
+  const comprasDaMoeda = compras.filter(c => CATEGORIES[c.categoria]?.moeda === tab);
+  const posicoes = agregarPorTicker(comprasDaMoeda);
+  const totalCusto = posicoes.reduce((a,p) => a + p.custoTotal, 0);
+  const temCotacao = posicoes.some(p => p.valorAtual !== null);
+  const totalAtual = posicoes.reduce((a,p) => a + (p.valorAtual !== null ? p.valorAtual : p.custoTotal), 0);
+  const ganhoTotal = totalAtual - totalCusto;
+  const ganhoPctTotal = totalCusto > 0 ? (ganhoTotal/totalCusto)*100 : null;
+
+  document.getElementById("summaryWrap").innerHTML = `
+    <div class="summary">
+      <div class="card">
+        <div class="label">Total investido (custo) em ${tab}</div>
+        <div class="value">${fmt(totalCusto, tab)}</div>
+        <div class="hint">${posicoes.length} ticker(s)</div>
+      </div>
+      <div class="card">
+        <div class="label">Valor atual estimado</div>
+        <div class="value">${temCotacao ? fmt(totalAtual, tab) : "—"}</div>
+        <div class="hint">${temCotacao ? "cotação com atraso de ~15-20 min" : "sem cotação disponível"}</div>
+      </div>
+      <div class="card">
+        <div class="label">Rentabilidade</div>
+        <div class="value ${ganhoPctTotal===null?'':(ganhoPctTotal>=0?'pos':'neg')}">${temCotacao ? fmtPct(ganhoPctTotal) : "—"}</div>
+        <div class="hint">${temCotacao ? fmt(ganhoTotal, tab) : ""}</div>
+      </div>
+    </div>`;
+}
+
+function renderResumoRF(){
+  const total = rendaFixa.reduce((a,r) => a + r.valor, 0);
+  document.getElementById("summaryWrap").innerHTML = `
+    <div class="summary" style="grid-template-columns:1fr;">
+      <div class="card">
+        <div class="label">Total aplicado em renda fixa</div>
+        <div class="value">${fmt(total, "BRL")}</div>
+        <div class="hint">${rendaFixa.length} aplicação(ões)</div>
+      </div>
+    </div>`;
+}
+
+function renderResumoDiv(){
+  const total = dividendos.reduce((a,d) => a + d.valor, 0);
+  const anoAtual = new Date().getFullYear();
+  const totalAno = dividendos.filter(d => new Date(d.data).getFullYear() === anoAtual).reduce((a,d) => a + d.valor, 0);
+  document.getElementById("summaryWrap").innerHTML = `
+    <div class="summary" style="grid-template-columns:1fr 1fr;">
+      <div class="card">
+        <div class="label">Total recebido (tudo)</div>
+        <div class="value">${fmt(total, "BRL")}</div>
+        <div class="hint">${dividendos.length} recebimento(s)</div>
+      </div>
+      <div class="card">
+        <div class="label">Recebido em ${anoAtual}</div>
+        <div class="value">${fmt(totalAno, "BRL")}</div>
+      </div>
+    </div>`;
+}
+
+/* ===================== CONTROLES E GRÁFICO ===================== */
+
+function renderChartControls(){
+  const wrap = document.getElementById("chartControls");
+  if(tab === "RF" || tab === "DIV"){ wrap.innerHTML = ""; return; }
+  let html = `<label>Agrupar por:
+      <select id="ctl_agrupar">
+        <option value="categoria" ${agruparPor==='categoria'?'selected':''}>Categoria</option>
+        <option value="ticker" ${agruparPor==='ticker'?'selected':''}>Ticker</option>
+      </select>
+    </label>`;
+  if(agruparPor === "categoria"){
+    if(tab === "BRL"){
+      html += `<label><input type="checkbox" id="ctl_rf" ${incluirRF?'checked':''}> Incluir Renda Fixa</label>`;
+    }
+    html += `<label><input type="checkbox" id="ctl_div" ${incluirDividendos?'checked':''}> Incluir dividendos recebidos</label>`;
+  }
+  wrap.innerHTML = html;
+  const selAgrupar = document.getElementById("ctl_agrupar");
+  if(selAgrupar) selAgrupar.addEventListener("change", (e) => { agruparPor = e.target.value; render(); });
+  const chkRf = document.getElementById("ctl_rf");
+  if(chkRf) chkRf.addEventListener("change", (e) => { incluirRF = e.target.checked; render(); });
+  const chkDiv = document.getElementById("ctl_div");
+  if(chkDiv) chkDiv.addEventListener("change", (e) => { incluirDividendos = e.target.checked; render(); });
+}
+
+function calcularDadosGrafico(){
   if(tab === "RF"){
-    document.getElementById("totalLabel").textContent = "Total aplicado em renda fixa";
-    const total = rendaFixa.reduce((a,r) => a + r.valor, 0);
-    document.getElementById("totalValue").textContent = fmt(total, "BRL");
-    document.getElementById("totalHint").textContent = rendaFixa.length + " aplicação(ões)";
-    dadosGrafico = Object.keys(CORES_RF).map(t => ({
+    return Object.keys(CORES_RF).map(t => ({
       nome: t, valor: rendaFixa.filter(r => r.tipo === t).reduce((a,r) => a+r.valor,0), cor: CORES_RF[t]
     })).filter(d => d.valor > 0);
-    renderRF();
-  } else if(tab === "DIV"){
-    document.getElementById("totalLabel").textContent = "Total recebido em proventos";
-    const total = dividendos.reduce((a,d) => a + d.valor, 0);
-    document.getElementById("totalValue").textContent = fmt(total, "BRL");
-    document.getElementById("totalHint").textContent = dividendos.length + " recebimento(s)";
-    dadosGrafico = Object.keys(CATEGORIES).map(nome => ({
+  }
+  if(tab === "DIV"){
+    return Object.keys(CATEGORIES).map(nome => ({
       nome, valor: dividendos.filter(d => d.categoria === nome).reduce((a,d)=>a+d.valor,0), cor: CATEGORIES[nome].cor
     })).filter(d => d.valor > 0);
-    renderDiv();
-  } else {
-    const comprasDaMoeda = compras.filter(c => CATEGORIES[c.categoria]?.moeda === tab);
-    const posicoes = agregarPorTicker(comprasDaMoeda);
-    const total = posicoes.reduce((a,p) => a + p.custoTotal, 0);
-    document.getElementById("totalLabel").textContent = "Total investido (custo) em " + tab;
-    document.getElementById("totalValue").textContent = fmt(total, tab);
-    document.getElementById("totalHint").textContent = posicoes.length + " ticker(s)";
-    dadosGrafico = Object.keys(CATEGORIES).filter(c => CATEGORIES[c].moeda === tab).map(nome => ({
-      nome, valor: posicoes.filter(p => p.categoria === nome).reduce((a,p)=>a+p.custoTotal,0), cor: CATEGORIES[nome].cor
-    })).filter(d => d.valor > 0);
-    renderPosicoes(posicoes);
-    renderHistorico(comprasDaMoeda);
   }
-  renderChart(dadosGrafico, tab);
+
+  const comprasDaMoeda = compras.filter(c => CATEGORIES[c.categoria]?.moeda === tab);
+  const posicoes = agregarPorTicker(comprasDaMoeda);
+
+  if(agruparPor === "ticker"){
+    return posicoes.map((p,i) => ({ nome: p.ticker, valor: p.custoTotal, cor: corParaTicker(p.ticker, i) })).filter(d => d.valor > 0);
+  }
+
+  let dados = Object.keys(CATEGORIES).filter(c => CATEGORIES[c].moeda === tab).map(nome => ({
+    nome, valor: posicoes.filter(p => p.categoria === nome).reduce((a,p)=>a+p.custoTotal,0), cor: CATEGORIES[nome].cor
+  })).filter(d => d.valor > 0);
+
+  if(incluirRF && tab === "BRL"){
+    const totalRF = rendaFixa.reduce((a,r) => a + r.valor, 0);
+    if(totalRF > 0) dados.push({ nome: "Renda Fixa", valor: totalRF, cor: COR_RF_SLICE });
+  }
+  if(incluirDividendos){
+    const totalDiv = dividendos.filter(d => CATEGORIES[d.categoria]?.moeda === tab).reduce((a,d) => a + d.valor, 0);
+    if(totalDiv > 0) dados.push({ nome: "Dividendos recebidos", valor: totalDiv, cor: COR_DIV_SLICE });
+  }
+  return dados;
 }
 
-function renderChart(dados, moedaTab){
-  const ctx = document.getElementById("pieChart");
-  try{
-    if(typeof Chart === "undefined"){
-      console.warn("Chart.js não carregou — gráfico desativado, mas o resto do painel funciona normalmente.");
-      return;
-    }
-    if(chart) chart.destroy();
-    if(dados.length === 0){
-      ctx.getContext("2d").clearRect(0,0,ctx.width,ctx.height);
-      return;
-    }
-    const moeda = moedaTab === "USD" ? "USD" : "BRL";
-    chart = new Chart(ctx, {
-      type: "doughnut",
-      data: { labels: dados.map(d=>d.nome), datasets:[{ data: dados.map(d=>d.valor), backgroundColor: dados.map(d=>d.cor) }] },
-      options: { plugins:{ legend:{ position:"right", labels:{ font:{size:11} } },
-        tooltip:{ callbacks:{ label: (c) => c.label + ": " + fmt(c.parsed, moeda) } } } }
-    });
-  }catch(e){
-    console.warn("Erro ao desenhar o gráfico (ignorado, não afeta o salvamento):", e);
+function renderChart(){
+  const wrap = document.getElementById("pieChartWrap");
+  const dados = calcularDadosGrafico();
+  const moeda = tab === "USD" ? "USD" : "BRL";
+  if(dados.length === 0){
+    wrap.innerHTML = '<div class="empty" style="padding:0;">Sem dados ainda</div>';
+    return;
   }
+  const total = dados.reduce((a,d) => a + d.valor, 0);
+  const raio = 45, raioInterno = 26, cx = 55, cy = 55;
+  let anguloAtual = -90;
+  let fatias = "";
+  dados.forEach(d => {
+    const fracao = d.valor / total;
+    const anguloFatia = fracao * 360;
+    const x1 = cx + raio * Math.cos(anguloAtual * Math.PI/180);
+    const y1 = cy + raio * Math.sin(anguloAtual * Math.PI/180);
+    const anguloFim = anguloAtual + anguloFatia;
+    const x2 = cx + raio * Math.cos(anguloFim * Math.PI/180);
+    const y2 = cy + raio * Math.sin(anguloFim * Math.PI/180);
+    const grandeArco = anguloFatia > 180 ? 1 : 0;
+    const xi1 = cx + raioInterno * Math.cos(anguloAtual * Math.PI/180);
+    const yi1 = cy + raioInterno * Math.sin(anguloAtual * Math.PI/180);
+    const xi2 = cx + raioInterno * Math.cos(anguloFim * Math.PI/180);
+    const yi2 = cy + raioInterno * Math.sin(anguloFim * Math.PI/180);
+    const pct = (fracao * 100).toFixed(0);
+    fatias += `<path d="M ${x1} ${y1} A ${raio} ${raio} 0 ${grandeArco} 1 ${x2} ${y2} L ${xi2} ${yi2} A ${raioInterno} ${raioInterno} 0 ${grandeArco} 0 ${xi1} ${yi1} Z" fill="${d.cor}"><title>${d.nome}: ${fmt(d.valor, moeda)} (${pct}%)</title></path>`;
+    anguloAtual = anguloFim;
+  });
+  const legenda = dados.map(d => {
+    const pct = ((d.valor/total)*100).toFixed(0);
+    return `<div class="item"><span class="dot" style="background:${d.cor}"></span>${d.nome} (${pct}%)</div>`;
+  }).join("");
+  wrap.innerHTML = `<svg viewBox="0 0 110 110" width="110" height="110">${fatias}</svg><div class="chart-legend">${legenda}</div>`;
 }
 
-function renderPosicoes(posicoes){
+/* ===================== COMPRAS ===================== */
+
+function renderPosicoes(){
   const wrap = document.getElementById("posicoesWrap");
+  const comprasDaMoeda = compras.filter(c => CATEGORIES[c.categoria]?.moeda === tab);
+  const posicoes = agregarPorTicker(comprasDaMoeda);
   if(posicoes.length === 0){
     wrap.innerHTML = '<div class="empty">Nenhuma compra em ' + tab + ' ainda. Lance a primeira acima.</div>';
     return;
   }
-  let html = '<h3 style="font-size:14px; font-weight:500; margin-bottom:8px;">Posições consolidadas</h3><table><thead><tr>' +
-    '<th>Ticker</th><th>Categoria</th><th class="right">Qtd total</th><th class="right">Preço médio</th><th class="right">Custo total</th></tr></thead><tbody>';
+  let html = '<h3>Posições consolidadas</h3><table><thead><tr>' +
+    '<th>Ticker</th><th>Categoria</th><th class="right">Qtd</th><th class="right">Preço médio</th>' +
+    '<th class="right">Custo total</th><th class="right">Cotação atual</th><th class="right">Valor atual</th><th class="right">Rentabilidade</th></tr></thead><tbody>';
   posicoes.forEach(p => {
+    const ganhoClasse = p.ganho === null ? "muted" : (p.ganho >= 0 ? "pos" : "neg");
     html += '<tr><td><b>' + p.ticker + '</b></td><td>' + p.categoria + '</td><td class="right">' + p.quantidade +
-      '</td><td class="right">' + fmt(p.precoMedio, tab) + '</td><td class="right">' + fmt(p.custoTotal, tab) + '</td></tr>';
+      '</td><td class="right">' + fmt(p.precoMedio, tab) + '</td><td class="right">' + fmt(p.custoTotal, tab) +
+      '</td><td class="right">' + (p.precoAtual !== null ? fmt(p.precoAtual, tab) : '<span class="muted">—</span>') +
+      '</td><td class="right">' + (p.valorAtual !== null ? fmt(p.valorAtual, tab) : '<span class="muted">—</span>') +
+      '</td><td class="right ' + ganhoClasse + '">' + (p.ganho !== null ? (fmt(p.ganho, tab) + ' (' + fmtPct(p.ganhoPct) + ')') : '—') + '</td></tr>';
   });
   html += '</tbody></table>';
   wrap.innerHTML = html;
 }
 
-function renderHistorico(lista){
+function renderHistorico(){
+  const comprasDaMoeda = compras.filter(c => CATEGORIES[c.categoria]?.moeda === tab);
   const btn = document.getElementById("toggleHist");
   const wrap = document.getElementById("historicoWrap");
-  btn.textContent = (historicoAberto ? "▴ " : "▾ ") + "Histórico de compras (" + lista.length + ")";
-  btn.style.display = lista.length ? "inline-block" : "none";
-  if(!historicoAberto || lista.length === 0){ wrap.innerHTML = ""; wrap.style.display = "none"; return; }
+  btn.textContent = (historicoAberto ? "▴ " : "▾ ") + "Histórico de compras (" + comprasDaMoeda.length + ")";
+  btn.style.display = comprasDaMoeda.length ? "inline-block" : "none";
+  if(!historicoAberto || comprasDaMoeda.length === 0){ wrap.innerHTML = ""; wrap.style.display = "none"; return; }
   wrap.style.display = "block";
-  const ordenado = [...lista].sort((a,b) => a.data < b.data ? 1 : -1);
-  let html = '<table><thead><tr><th>Data</th><th>Ticker</th><th class="right">Qtd</th><th class="right">Preço</th><th></th></tr></thead><tbody>';
+  const ordenado = [...comprasDaMoeda].sort((a,b) => a.data < b.data ? 1 : -1);
+  let html = '<table><thead><tr><th>Data</th><th>Categoria</th><th>Ticker</th><th class="right">Qtd</th><th class="right">Preço</th><th></th></tr></thead><tbody>';
   ordenado.forEach(c => {
-    html += '<tr><td>' + c.data + '</td><td>' + c.ticker + '</td><td class="right">' + c.quantidade +
-      '</td><td class="right">' + fmt(c.preco, tab) + '</td><td class="right"><button class="del" data-id="' + c.id + '">✕</button></td></tr>';
+    html += '<tr><td>' + c.data + '</td><td>' + c.categoria + '</td><td>' + c.ticker + '</td><td class="right">' + c.quantidade +
+      '</td><td class="right">' + fmt(c.preco, tab) + '</td><td class="right">' +
+      '<button class="edit" data-id="' + c.id + '">✏️</button>' +
+      '<button class="del" data-id="' + c.id + '">✕</button></td></tr>';
   });
   html += '</tbody></table>';
   wrap.innerHTML = html;
@@ -313,7 +491,35 @@ function renderHistorico(lista){
     compras = compras.filter(c => c.id !== b.dataset.id);
     render(); await saveToSheet();
   }));
+  wrap.querySelectorAll(".edit").forEach(b => b.addEventListener("click", () => iniciarEdicaoCompra(b.dataset.id)));
 }
+
+function iniciarEdicaoCompra(id){
+  const c = compras.find(x => x.id === id);
+  if(!c) return;
+  editando = { tipo: "compra", id };
+  document.getElementById("f_id").value = id;
+  document.getElementById("f_categoria").value = c.categoria;
+  document.getElementById("f_ticker").value = c.ticker;
+  document.getElementById("f_data").value = c.data;
+  document.getElementById("f_quantidade").value = c.quantidade;
+  document.getElementById("f_preco").value = c.preco;
+  const btn = document.getElementById("f_submitBtn");
+  btn.textContent = "Salvar edição"; btn.classList.add("editing");
+  document.getElementById("f_cancelBtn").style.display = "inline-block";
+}
+
+function cancelarEdicaoCompra(){
+  editando = { tipo: null, id: null };
+  document.getElementById("f_id").value = "";
+  document.getElementById("f_ticker").value = ""; document.getElementById("f_quantidade").value = ""; document.getElementById("f_preco").value = "";
+  document.getElementById("f_data").value = hoje();
+  const btn = document.getElementById("f_submitBtn");
+  btn.textContent = "+ Add"; btn.classList.remove("editing");
+  document.getElementById("f_cancelBtn").style.display = "none";
+}
+
+/* ===================== RENDA FIXA ===================== */
 
 function renderRF(){
   const wrap = document.getElementById("rfWrap");
@@ -325,7 +531,9 @@ function renderRF(){
   let html = '<table><thead><tr><th>Tipo</th><th>Nome</th><th class="right">Valor</th><th>Taxa</th><th>Vencimento</th><th></th></tr></thead><tbody>';
   ordenado.forEach(r => {
     html += '<tr><td>' + r.tipo + '</td><td><b>' + r.nome + '</b></td><td class="right">' + fmt(r.valor,"BRL") +
-      '</td><td>' + (r.taxa || "—") + '</td><td>' + (r.vencimento || "—") + '</td><td class="right"><button class="del" data-id="' + r.id + '">✕</button></td></tr>';
+      '</td><td>' + (r.taxa || "—") + '</td><td>' + (r.vencimento || "—") + '</td><td class="right">' +
+      '<button class="edit" data-id="' + r.id + '">✏️</button>' +
+      '<button class="del" data-id="' + r.id + '">✕</button></td></tr>';
   });
   html += '</tbody></table>';
   wrap.innerHTML = html;
@@ -333,20 +541,95 @@ function renderRF(){
     rendaFixa = rendaFixa.filter(r => r.id !== b.dataset.id);
     render(); await saveToSheet();
   }));
+  wrap.querySelectorAll(".edit").forEach(b => b.addEventListener("click", () => iniciarEdicaoRF(b.dataset.id)));
+}
+
+function iniciarEdicaoRF(id){
+  const r = rendaFixa.find(x => x.id === id);
+  if(!r) return;
+  editando = { tipo: "rf", id };
+  document.getElementById("rf_id").value = id;
+  document.getElementById("rf_tipo").value = r.tipo;
+  document.getElementById("rf_nome").value = r.nome;
+  document.getElementById("rf_valor").value = r.valor;
+  document.getElementById("rf_taxa").value = r.taxa;
+  document.getElementById("rf_dataAplicacao").value = r.dataAplicacao;
+  document.getElementById("rf_vencimento").value = r.vencimento;
+  const btn = document.getElementById("rf_submitBtn");
+  btn.textContent = "Salvar edição"; btn.classList.add("editing");
+  document.getElementById("rf_cancelBtn").style.display = "inline-block";
+}
+
+function cancelarEdicaoRF(){
+  editando = { tipo: null, id: null };
+  document.getElementById("rf_id").value = "";
+  document.getElementById("rf_nome").value = ""; document.getElementById("rf_valor").value = "";
+  document.getElementById("rf_taxa").value = ""; document.getElementById("rf_vencimento").value = "";
+  document.getElementById("rf_dataAplicacao").value = hoje();
+  const btn = document.getElementById("rf_submitBtn");
+  btn.textContent = "+ Adicionar aplicação"; btn.classList.remove("editing");
+  document.getElementById("rf_cancelBtn").style.display = "none";
+}
+
+/* ===================== DIVIDENDOS ===================== */
+
+function renderDivAcumulados(){
+  const anoAtual = new Date().getFullYear();
+  const doAno = dividendos.filter(d => new Date(d.data).getFullYear() === anoAtual);
+
+  // Por ativo
+  const porAtivo = {};
+  doAno.forEach(d => {
+    const chave = d.categoria + "|" + d.ticker;
+    if(!porAtivo[chave]) porAtivo[chave] = { categoria: d.categoria, ticker: d.ticker, total: 0 };
+    porAtivo[chave].total += d.valor;
+  });
+  const listaAtivo = Object.values(porAtivo).sort((a,b) => b.total - a.total);
+  const wrapAtivo = document.getElementById("divPorAtivoWrap");
+  if(listaAtivo.length === 0){
+    wrapAtivo.innerHTML = '<div class="empty">Nenhum provento em ' + anoAtual + ' ainda.</div>';
+  } else {
+    let html = '<table><thead><tr><th>Ticker</th><th>Categoria</th><th class="right">Total em ' + anoAtual + '</th></tr></thead><tbody>';
+    listaAtivo.forEach(p => {
+      html += '<tr><td><b>' + p.ticker + '</b></td><td>' + p.categoria + '</td><td class="right">' +
+        fmt(p.total, CATEGORIES[p.categoria]?.moeda === "USD" ? "USD" : "BRL") + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    wrapAtivo.innerHTML = html;
+  }
+
+  // Por mês (todos os anos, mais recente primeiro)
+  const porMes = {};
+  dividendos.forEach(d => {
+    const chave = d.data.slice(0,7); // YYYY-MM
+    porMes[chave] = (porMes[chave] || 0) + d.valor;
+  });
+  const meses = Object.keys(porMes).sort().reverse();
+  const wrapMes = document.getElementById("divPorMesWrap");
+  if(meses.length === 0){
+    wrapMes.innerHTML = '<div class="empty">Nenhum provento lançado ainda.</div>';
+  } else {
+    let html = '<table><thead><tr><th>Mês</th><th class="right">Total recebido</th></tr></thead><tbody>';
+    meses.forEach(m => {
+      html += '<tr><td>' + m + '</td><td class="right">' + fmt(porMes[m], "BRL") + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    wrapMes.innerHTML = html;
+  }
 }
 
 function renderDiv(){
+  const btn = document.getElementById("toggleDivHist");
   const wrap = document.getElementById("divWrap");
-  if(dividendos.length === 0){
-    wrap.innerHTML = '<div class="empty">Nenhum provento lançado ainda.</div>';
-    return;
-  }
+  btn.textContent = (divHistoricoAberto ? "▴ " : "▾ ") + "Histórico completo de proventos (" + dividendos.length + ")";
+  if(!divHistoricoAberto || dividendos.length === 0){ wrap.innerHTML = ""; wrap.style.display = "none"; return; }
+  wrap.style.display = "block";
   const ordenado = [...dividendos].sort((a,b) => a.data < b.data ? 1 : -1);
   let html = '<table><thead><tr><th>Data</th><th>Categoria</th><th>Ticker</th><th>Tipo</th><th class="right">Valor</th><th></th></tr></thead><tbody>';
   ordenado.forEach(d => {
     html += '<tr><td>' + d.data + '</td><td>' + d.categoria + '</td><td><b>' + d.ticker + '</b></td><td>' + d.tipo +
       '</td><td class="right">' + fmt(d.valor, CATEGORIES[d.categoria]?.moeda === "USD" ? "USD" : "BRL") +
-      '</td><td class="right"><button class="del" data-id="' + d.id + '">✕</button></td></tr>';
+      '</td><td class="right"><button class="edit" data-id="' + d.id + '">✏️</button><button class="del" data-id="' + d.id + '">✕</button></td></tr>';
   });
   html += '</tbody></table>';
   wrap.innerHTML = html;
@@ -354,10 +637,39 @@ function renderDiv(){
     dividendos = dividendos.filter(d => d.id !== b.dataset.id);
     render(); await saveToSheet();
   }));
+  wrap.querySelectorAll(".edit").forEach(b => b.addEventListener("click", () => iniciarEdicaoDiv(b.dataset.id)));
 }
+
+function iniciarEdicaoDiv(id){
+  const d = dividendos.find(x => x.id === id);
+  if(!d) return;
+  editando = { tipo: "div", id };
+  document.getElementById("d_id").value = id;
+  document.getElementById("d_categoria").value = d.categoria;
+  document.getElementById("d_ticker").value = d.ticker;
+  document.getElementById("d_data").value = d.data;
+  document.getElementById("d_tipo").value = d.tipo;
+  document.getElementById("d_valor").value = d.valor;
+  const btn = document.getElementById("d_submitBtn");
+  btn.textContent = "Salvar edição"; btn.classList.add("editing");
+  document.getElementById("d_cancelBtn").style.display = "inline-block";
+}
+
+function cancelarEdicaoDiv(){
+  editando = { tipo: null, id: null };
+  document.getElementById("d_id").value = "";
+  document.getElementById("d_ticker").value = ""; document.getElementById("d_valor").value = "";
+  document.getElementById("d_data").value = hoje();
+  const btn = document.getElementById("d_submitBtn");
+  btn.textContent = "+ Add"; btn.classList.remove("editing");
+  document.getElementById("d_cancelBtn").style.display = "none";
+}
+
+/* ===================== EVENTOS ===================== */
 
 document.querySelectorAll(".tab").forEach(b => b.addEventListener("click", () => { tab = b.dataset.tab; render(); }));
 document.getElementById("toggleHist").addEventListener("click", () => { historicoAberto = !historicoAberto; render(); });
+document.getElementById("toggleDivHist").addEventListener("click", () => { divHistoricoAberto = !divHistoricoAberto; render(); });
 
 document.getElementById("f_data").value = hoje();
 document.getElementById("formCompra").addEventListener("submit", async (e) => {
@@ -366,14 +678,20 @@ document.getElementById("formCompra").addEventListener("submit", async (e) => {
   const quantidade = parseFloat(document.getElementById("f_quantidade").value);
   const preco = parseFloat(document.getElementById("f_preco").value);
   if(!ticker || !quantidade || !preco) return;
-  compras.push({
-    id: Date.now().toString(), categoria: document.getElementById("f_categoria").value,
-    ticker, data: document.getElementById("f_data").value, quantidade, preco
-  });
-  document.getElementById("f_ticker").value = ""; document.getElementById("f_quantidade").value = ""; document.getElementById("f_preco").value = "";
+  const categoria = document.getElementById("f_categoria").value;
+  const data = document.getElementById("f_data").value;
+
+  if(editando.tipo === "compra" && editando.id){
+    const idx = compras.findIndex(c => c.id === editando.id);
+    if(idx > -1) compras[idx] = { id: editando.id, categoria, ticker, data, quantidade, preco };
+  } else {
+    compras.push({ id: Date.now().toString(), categoria, ticker, data, quantidade, preco });
+  }
+  cancelarEdicaoCompra();
   render();
   await saveToSheet();
 });
+document.getElementById("f_cancelBtn").addEventListener("click", () => { cancelarEdicaoCompra(); render(); });
 
 document.getElementById("rf_dataAplicacao").value = hoje();
 document.getElementById("formRF").addEventListener("submit", async (e) => {
@@ -381,15 +699,22 @@ document.getElementById("formRF").addEventListener("submit", async (e) => {
   const nome = document.getElementById("rf_nome").value.trim();
   const valor = parseFloat(document.getElementById("rf_valor").value);
   if(!nome || !valor) return;
-  rendaFixa.push({
-    id: Date.now().toString(), tipo: document.getElementById("rf_tipo").value, nome, valor,
-    taxa: document.getElementById("rf_taxa").value, dataAplicacao: document.getElementById("rf_dataAplicacao").value,
-    vencimento: document.getElementById("rf_vencimento").value
-  });
-  document.getElementById("rf_nome").value = ""; document.getElementById("rf_valor").value = ""; document.getElementById("rf_taxa").value = ""; document.getElementById("rf_vencimento").value = "";
+  const tipo = document.getElementById("rf_tipo").value;
+  const taxa = document.getElementById("rf_taxa").value;
+  const dataAplicacao = document.getElementById("rf_dataAplicacao").value;
+  const vencimento = document.getElementById("rf_vencimento").value;
+
+  if(editando.tipo === "rf" && editando.id){
+    const idx = rendaFixa.findIndex(r => r.id === editando.id);
+    if(idx > -1) rendaFixa[idx] = { id: editando.id, tipo, nome, valor, taxa, dataAplicacao, vencimento };
+  } else {
+    rendaFixa.push({ id: Date.now().toString(), tipo, nome, valor, taxa, dataAplicacao, vencimento });
+  }
+  cancelarEdicaoRF();
   render();
   await saveToSheet();
 });
+document.getElementById("rf_cancelBtn").addEventListener("click", () => { cancelarEdicaoRF(); render(); });
 
 document.getElementById("d_data").value = hoje();
 document.getElementById("formDiv").addEventListener("submit", async (e) => {
@@ -397,14 +722,21 @@ document.getElementById("formDiv").addEventListener("submit", async (e) => {
   const ticker = document.getElementById("d_ticker").value.trim().toUpperCase();
   const valor = parseFloat(document.getElementById("d_valor").value);
   if(!ticker || !valor) return;
-  dividendos.push({
-    id: Date.now().toString(), categoria: document.getElementById("d_categoria").value, ticker,
-    data: document.getElementById("d_data").value, tipo: document.getElementById("d_tipo").value, valor
-  });
-  document.getElementById("d_ticker").value = ""; document.getElementById("d_valor").value = "";
+  const categoria = document.getElementById("d_categoria").value;
+  const data = document.getElementById("d_data").value;
+  const tipo = document.getElementById("d_tipo").value;
+
+  if(editando.tipo === "div" && editando.id){
+    const idx = dividendos.findIndex(d => d.id === editando.id);
+    if(idx > -1) dividendos[idx] = { id: editando.id, categoria, ticker, data, tipo, valor };
+  } else {
+    dividendos.push({ id: Date.now().toString(), categoria, ticker, data, tipo, valor });
+  }
+  cancelarEdicaoDiv();
   render();
   await saveToSheet();
 });
+document.getElementById("d_cancelBtn").addEventListener("click", () => { cancelarEdicaoDiv(); render(); });
 
 render();
 loadFromSheet();
