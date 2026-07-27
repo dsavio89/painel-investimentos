@@ -253,9 +253,13 @@ function agregarPorTicker(lista){
     const precoAtual = cotacoes[p.ticker] || null;
     const precoMedio = p.quantidade > 0 ? p.custoTotal / p.quantidade : 0;
     const valorAtual = precoAtual !== null ? p.quantidade * precoAtual : null;
-    const ganho = valorAtual !== null ? valorAtual - p.custoTotal : null;
+    const dividendosRecebidos = dividendos
+      .filter(d => d.categoria === p.categoria && d.ticker === p.ticker)
+      .reduce((a,d) => a + d.valor, 0);
+    const ganhoCapital = valorAtual !== null ? valorAtual - p.custoTotal : null;
+    const ganho = ganhoCapital !== null ? ganhoCapital + dividendosRecebidos : null; // retorno total
     const ganhoPct = (ganho !== null && p.custoTotal > 0) ? (ganho / p.custoTotal) * 100 : null;
-    return { ...p, precoMedio, precoAtual, valorAtual, ganho, ganhoPct };
+    return { ...p, precoMedio, precoAtual, valorAtual, dividendosRecebidos, ganho, ganhoPct };
   });
 }
 
@@ -295,7 +299,8 @@ function renderResumoCompras(){
   const totalCusto = posicoes.reduce((a,p) => a + p.custoTotal, 0);
   const temCotacao = posicoes.some(p => p.valorAtual !== null);
   const totalAtual = posicoes.reduce((a,p) => a + (p.valorAtual !== null ? p.valorAtual : p.custoTotal), 0);
-  const ganhoTotal = totalAtual - totalCusto;
+  const totalDividendos = posicoes.reduce((a,p) => a + p.dividendosRecebidos, 0);
+  const ganhoTotal = (totalAtual - totalCusto) + totalDividendos;
   const ganhoPctTotal = totalCusto > 0 ? (ganhoTotal/totalCusto)*100 : null;
 
   document.getElementById("summaryWrap").innerHTML = `
@@ -311,9 +316,9 @@ function renderResumoCompras(){
         <div class="hint">${temCotacao ? "cotação com atraso de ~15-20 min" : "sem cotação disponível"}</div>
       </div>
       <div class="card">
-        <div class="label">Rentabilidade</div>
+        <div class="label">Retorno total (valorização + dividendos)</div>
         <div class="value ${ganhoPctTotal===null?'':(ganhoPctTotal>=0?'pos':'neg')}">${temCotacao ? fmtPct(ganhoPctTotal) : "—"}</div>
-        <div class="hint">${temCotacao ? fmt(ganhoTotal, tab) : ""}</div>
+        <div class="hint">${temCotacao ? fmt(ganhoTotal, tab) + (totalDividendos>0 ? " (inclui " + fmt(totalDividendos, tab) + " de dividendos)" : "") : ""}</div>
       </div>
     </div>`;
 }
@@ -456,13 +461,15 @@ function renderPosicoes(){
   }
   let html = '<h3>Posições consolidadas</h3><table><thead><tr>' +
     '<th>Ticker</th><th>Categoria</th><th class="right">Qtd</th><th class="right">Preço médio</th>' +
-    '<th class="right">Custo total</th><th class="right">Cotação atual</th><th class="right">Valor atual</th><th class="right">Rentabilidade</th></tr></thead><tbody>';
+    '<th class="right">Custo total</th><th class="right">Cotação atual</th><th class="right">Valor atual</th>' +
+    '<th class="right">Dividendos</th><th class="right">Retorno total</th></tr></thead><tbody>';
   posicoes.forEach(p => {
     const ganhoClasse = p.ganho === null ? "muted" : (p.ganho >= 0 ? "pos" : "neg");
     html += '<tr><td><b>' + p.ticker + '</b></td><td>' + p.categoria + '</td><td class="right">' + p.quantidade +
       '</td><td class="right">' + fmt(p.precoMedio, tab) + '</td><td class="right">' + fmt(p.custoTotal, tab) +
       '</td><td class="right">' + (p.precoAtual !== null ? fmt(p.precoAtual, tab) : '<span class="muted">—</span>') +
       '</td><td class="right">' + (p.valorAtual !== null ? fmt(p.valorAtual, tab) : '<span class="muted">—</span>') +
+      '</td><td class="right">' + (p.dividendosRecebidos > 0 ? fmt(p.dividendosRecebidos, tab) : '<span class="muted">—</span>') +
       '</td><td class="right ' + ganhoClasse + '">' + (p.ganho !== null ? (fmt(p.ganho, tab) + ' (' + fmtPct(p.ganhoPct) + ')') : '—') + '</td></tr>';
   });
   html += '</tbody></table>';
