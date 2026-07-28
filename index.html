@@ -135,12 +135,19 @@
     <div><label>Tipo</label>
       <select id="d_tipo"><option>Dividendo</option><option>JCP</option><option>Rendimento</option></select>
     </div>
-    <div><label>Valor recebido</label><input type="number" step="0.01" id="d_valor" placeholder="45.30"></div>
+    <div><label>Valor por cota/ação</label><input type="number" step="0.0001" id="d_valorUnitario" placeholder="0.85"></div>
+    <div>
+      <label>Total calculado</label>
+      <div id="d_totalCalculado" style="font-size:14px; padding:6px 8px; background:#fff; border:1px solid #ddd; border-radius:6px; color:#333;">—</div>
+    </div>
     <div style="display:flex; gap:6px;">
       <button type="submit" class="add" id="d_submitBtn">+ Add</button>
       <button type="button" class="cancel-edit" id="d_cancelBtn" style="display:none;">Cancelar</button>
     </div>
   </form>
+  <p style="font-size:11px; color:#aaa; margin-top:-14px; margin-bottom:20px;">
+    O total é calculado usando a quantidade que você tem hoje daquele ticker (não a quantidade histórica na data do pagamento).
+  </p>
 
   <div class="subsection">
     <h3>Acumulado no ano por ativo</h3>
@@ -196,6 +203,28 @@ function showSaveError(on){ document.getElementById("saveError").style.display =
 function setStatus(txt){ document.getElementById("status").textContent = txt; }
 function corParaTicker(ticker, indice){ return PALETA_TICKERS[indice % PALETA_TICKERS.length]; }
 
+function getQuantidadeAtual(categoria, ticker){
+  return compras
+    .filter(c => c.categoria === categoria && c.ticker === ticker)
+    .reduce((a,c) => a + c.quantidade, 0);
+}
+
+function recalcularTotalDividendo(){
+  const categoria = document.getElementById("d_categoria").value;
+  const ticker = document.getElementById("d_ticker").value.trim().toUpperCase();
+  const valorUnitario = parseFloat(document.getElementById("d_valorUnitario").value) || 0;
+  const qtd = getQuantidadeAtual(categoria, ticker);
+  const moeda = CATEGORIES[categoria]?.moeda === "USD" ? "USD" : "BRL";
+  const totalEl = document.getElementById("d_totalCalculado");
+  if(!ticker || qtd === 0){
+    totalEl.textContent = qtd === 0 && ticker ? "sem posição desse ticker" : "—";
+    return 0;
+  }
+  const total = qtd * valorUnitario;
+  totalEl.textContent = fmt(total, moeda) + " (" + qtd + " cotas/ações)";
+  return total;
+}
+
 async function loadFromSheet(){
   if(APPS_SCRIPT_URL.includes("COLE_SUA_URL_AQUI")){
     document.getElementById("configWarning").style.display = "block";
@@ -205,9 +234,9 @@ async function loadFromSheet(){
   try{
     const res = await fetch(APPS_SCRIPT_URL);
     const data = await res.json();
-    compras = (data.compras || []).map(c => ({ ...c, quantidade: Number(c.quantidade), preco: Number(c.preco) }));
-    rendaFixa = (data.rendaFixa || []).map(r => ({ ...r, valor: Number(r.valor) }));
-    dividendos = (data.dividendos || []).map(d => ({ ...d, valor: Number(d.valor) }));
+    compras = (data.compras || []).map(c => ({ ...c, id: String(c.id), quantidade: Number(c.quantidade), preco: Number(c.preco) }));
+    rendaFixa = (data.rendaFixa || []).map(r => ({ ...r, id: String(r.id), valor: Number(r.valor) }));
+    dividendos = (data.dividendos || []).map(d => ({ ...d, id: String(d.id), valor: Number(d.valor), valorUnitario: Number(d.valorUnitario) || 0 }));
     cotacoes = data.cotacoes || {};
     showSaveError(false);
     setStatus("Sincronizado com a planilha.");
@@ -632,9 +661,10 @@ function renderDiv(){
   if(!divHistoricoAberto || dividendos.length === 0){ wrap.innerHTML = ""; wrap.style.display = "none"; return; }
   wrap.style.display = "block";
   const ordenado = [...dividendos].sort((a,b) => a.data < b.data ? 1 : -1);
-  let html = '<table><thead><tr><th>Data</th><th>Categoria</th><th>Ticker</th><th>Tipo</th><th class="right">Valor</th><th></th></tr></thead><tbody>';
+  let html = '<table><thead><tr><th>Data</th><th>Categoria</th><th>Ticker</th><th>Tipo</th><th class="right">Valor/cota</th><th class="right">Total</th><th></th></tr></thead><tbody>';
   ordenado.forEach(d => {
     html += '<tr><td>' + d.data + '</td><td>' + d.categoria + '</td><td><b>' + d.ticker + '</b></td><td>' + d.tipo +
+      '</td><td class="right">' + fmt(d.valorUnitario || 0, CATEGORIES[d.categoria]?.moeda === "USD" ? "USD" : "BRL") +
       '</td><td class="right">' + fmt(d.valor, CATEGORIES[d.categoria]?.moeda === "USD" ? "USD" : "BRL") +
       '</td><td class="right"><button class="edit" data-id="' + d.id + '">✏️</button><button class="del" data-id="' + d.id + '">✕</button></td></tr>';
   });
@@ -656,7 +686,8 @@ function iniciarEdicaoDiv(id){
   document.getElementById("d_ticker").value = d.ticker;
   document.getElementById("d_data").value = d.data;
   document.getElementById("d_tipo").value = d.tipo;
-  document.getElementById("d_valor").value = d.valor;
+  document.getElementById("d_valorUnitario").value = d.valorUnitario || (d.valor && getQuantidadeAtual(d.categoria,d.ticker) ? (d.valor/getQuantidadeAtual(d.categoria,d.ticker)) : "");
+  recalcularTotalDividendo();
   const btn = document.getElementById("d_submitBtn");
   btn.textContent = "Salvar edição"; btn.classList.add("editing");
   document.getElementById("d_cancelBtn").style.display = "inline-block";
@@ -665,8 +696,9 @@ function iniciarEdicaoDiv(id){
 function cancelarEdicaoDiv(){
   editando = { tipo: null, id: null };
   document.getElementById("d_id").value = "";
-  document.getElementById("d_ticker").value = ""; document.getElementById("d_valor").value = "";
+  document.getElementById("d_ticker").value = ""; document.getElementById("d_valorUnitario").value = "";
   document.getElementById("d_data").value = hoje();
+  document.getElementById("d_totalCalculado").textContent = "—";
   const btn = document.getElementById("d_submitBtn");
   btn.textContent = "+ Add"; btn.classList.remove("editing");
   document.getElementById("d_cancelBtn").style.display = "none";
@@ -724,20 +756,27 @@ document.getElementById("formRF").addEventListener("submit", async (e) => {
 document.getElementById("rf_cancelBtn").addEventListener("click", () => { cancelarEdicaoRF(); render(); });
 
 document.getElementById("d_data").value = hoje();
+["d_categoria","d_ticker","d_valorUnitario"].forEach(id => {
+  document.getElementById(id).addEventListener("input", recalcularTotalDividendo);
+  document.getElementById(id).addEventListener("change", recalcularTotalDividendo);
+});
 document.getElementById("formDiv").addEventListener("submit", async (e) => {
   e.preventDefault();
   const ticker = document.getElementById("d_ticker").value.trim().toUpperCase();
-  const valor = parseFloat(document.getElementById("d_valor").value);
-  if(!ticker || !valor) return;
+  const valorUnitario = parseFloat(document.getElementById("d_valorUnitario").value);
   const categoria = document.getElementById("d_categoria").value;
+  if(!ticker || !valorUnitario) return;
+  const qtd = getQuantidadeAtual(categoria, ticker);
+  if(qtd === 0){ alert("Você não tem posição desse ticker lançada nas compras. Lance a compra primeiro."); return; }
+  const valor = qtd * valorUnitario;
   const data = document.getElementById("d_data").value;
   const tipo = document.getElementById("d_tipo").value;
 
   if(editando.tipo === "div" && editando.id){
     const idx = dividendos.findIndex(d => d.id === editando.id);
-    if(idx > -1) dividendos[idx] = { id: editando.id, categoria, ticker, data, tipo, valor };
+    if(idx > -1) dividendos[idx] = { id: editando.id, categoria, ticker, data, tipo, valorUnitario, valor };
   } else {
-    dividendos.push({ id: Date.now().toString(), categoria, ticker, data, tipo, valor });
+    dividendos.push({ id: Date.now().toString(), categoria, ticker, data, tipo, valorUnitario, valor });
   }
   cancelarEdicaoDiv();
   render();
@@ -750,3 +789,4 @@ loadFromSheet();
 </script>
 </body>
 </html>
+
