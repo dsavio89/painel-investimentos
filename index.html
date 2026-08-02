@@ -183,6 +183,7 @@ let compras = [];
 let rendaFixa = [];
 let dividendos = [];
 let cotacoes = {};
+let cambio = { hoje: null, porData: {} };
 let tab = "BRL";
 let historicoAberto = false;
 let divHistoricoAberto = false;
@@ -238,6 +239,7 @@ async function loadFromSheet(){
     rendaFixa = (data.rendaFixa || []).map(r => ({ ...r, id: String(r.id), valor: Number(r.valor) }));
     dividendos = (data.dividendos || []).map(d => ({ ...d, id: String(d.id), valor: Number(d.valor), valorUnitario: Number(d.valorUnitario) || 0 }));
     cotacoes = data.cotacoes || {};
+    cambio = data.cambio || { hoje: null, porData: {} };
     showSaveError(false);
     setStatus("Sincronizado com a planilha.");
   }catch(e){
@@ -274,14 +276,21 @@ function agregarPorTicker(lista){
   const mapa = {};
   lista.forEach(c => {
     const chave = c.categoria + "|" + c.ticker;
-    if(!mapa[chave]) mapa[chave] = { categoria:c.categoria, ticker:c.ticker, quantidade:0, custoTotal:0 };
+    if(!mapa[chave]) mapa[chave] = { categoria:c.categoria, ticker:c.ticker, quantidade:0, custoTotal:0, custoTotalReal:0, temCambioCompleto:true };
     mapa[chave].quantidade += c.quantidade;
     mapa[chave].custoTotal += c.quantidade * c.preco;
+    const taxaDoDia = cambio.porData[c.data];
+    if(taxaDoDia){
+      mapa[chave].custoTotalReal += c.quantidade * c.preco * taxaDoDia;
+    } else {
+      mapa[chave].temCambioCompleto = false;
+    }
   });
   return Object.values(mapa).map(p => {
     const precoAtual = cotacoes[p.ticker] || null;
     const precoMedio = p.quantidade > 0 ? p.custoTotal / p.quantidade : 0;
     const valorAtual = precoAtual !== null ? p.quantidade * precoAtual : null;
+    const valorAtualReal = (valorAtual !== null && cambio.hoje) ? valorAtual * cambio.hoje : null;
     const dividendosRecebidos = dividendos
       .filter(d => d.categoria === p.categoria && d.ticker === p.ticker)
       .reduce((a,d) => a + d.valor, 0);
@@ -294,7 +303,7 @@ function agregarPorTicker(lista){
     const ganhoCapital = valorAtual !== null ? valorAtual - p.custoTotal : null;
     const ganho = ganhoCapital !== null ? ganhoCapital + dividendosRecebidos : null; // retorno total
     const ganhoPct = (ganho !== null && p.custoTotal > 0) ? (ganho / p.custoTotal) * 100 : null;
-    return { ...p, precoMedio, precoAtual, valorAtual, dividendosRecebidos, dyCusto, ganho, ganhoPct };
+    return { ...p, precoMedio, precoAtual, valorAtual, valorAtualReal, dividendosRecebidos, dyCusto, ganho, ganhoPct };
   });
 }
 
@@ -338,16 +347,34 @@ function renderResumoCompras(){
   const ganhoTotal = (totalAtual - totalCusto) + totalDividendos;
   const ganhoPctTotal = totalCusto > 0 ? (ganhoTotal/totalCusto)*100 : null;
 
+  let cardDolar = "";
+  let custoValor = fmt(totalCusto, tab);
+  let atualValor = temCotacao ? fmt(totalAtual, tab) : "—";
+
+  if(tab === "USD"){
+    const totalCustoReal = posicoes.reduce((a,p) => a + (p.custoTotalReal || 0), 0);
+    const totalAtualReal = posicoes.reduce((a,p) => a + (p.valorAtualReal !== null ? p.valorAtualReal : (p.custoTotalReal||0)), 0);
+    if(totalCustoReal > 0) custoValor += ` (${fmt(totalCustoReal, "BRL")})`;
+    if(temCotacao && totalAtualReal > 0) atualValor += ` (${fmt(totalAtualReal, "BRL")})`;
+    cardDolar = `
+      <div class="card">
+        <div class="label">Cotação do dólar hoje</div>
+        <div class="value">${cambio.hoje ? fmt(cambio.hoje, "BRL") : "—"}</div>
+        <div class="hint">1 USD, com atraso de ~15-20 min</div>
+      </div>`;
+  }
+
   document.getElementById("summaryWrap").innerHTML = `
+    ${cardDolar ? `<div class="summary" style="grid-template-columns:1fr;">${cardDolar}</div>` : ""}
     <div class="summary">
       <div class="card">
         <div class="label">Total investido (custo) em ${tab}</div>
-        <div class="value">${fmt(totalCusto, tab)}</div>
+        <div class="value">${custoValor}</div>
         <div class="hint">${posicoes.length} ticker(s)</div>
       </div>
       <div class="card">
         <div class="label">Valor atual estimado</div>
-        <div class="value">${temCotacao ? fmt(totalAtual, tab) : "—"}</div>
+        <div class="value">${atualValor}</div>
         <div class="hint">${temCotacao ? "cotação com atraso de ~15-20 min" : "sem cotação disponível"}</div>
       </div>
       <div class="card">
@@ -494,14 +521,21 @@ function renderPosicoes(){
     wrap.innerHTML = '<div class="empty">Nenhuma compra em ' + tab + ' ainda. Lance a primeira acima.</div>';
     return;
   }
+  const colunasReal = tab === "USD";
   let html = '<h3>Posições consolidadas</h3><table><thead><tr>' +
     '<th>Ticker</th><th>Categoria</th><th class="right">Qtd</th><th class="right">Preço médio</th>' +
-    '<th class="right">Custo total</th><th class="right">Cotação atual</th><th class="right">Valor atual</th>' +
+    (colunasReal ? '<th class="right">Custo (R$)</th>' : '') +
+    '<th class="right">Custo total</th>' +
+    (colunasReal ? '<th class="right">Valor atual (R$)</th>' : '') +
+    '<th class="right">Cotação atual</th><th class="right">Valor atual</th>' +
     '<th class="right">Dividendos</th><th class="right">DY s/ custo (12m)</th><th class="right">Retorno total</th></tr></thead><tbody>';
   posicoes.forEach(p => {
     const ganhoClasse = p.ganho === null ? "muted" : (p.ganho >= 0 ? "pos" : "neg");
     html += '<tr><td><b>' + p.ticker + '</b></td><td>' + p.categoria + '</td><td class="right">' + p.quantidade +
-      '</td><td class="right">' + fmt(p.precoMedio, tab) + '</td><td class="right">' + fmt(p.custoTotal, tab) +
+      '</td><td class="right">' + fmt(p.precoMedio, tab) +
+      (colunasReal ? '</td><td class="right">' + (p.custoTotalReal > 0 ? fmt(p.custoTotalReal, "BRL") : '<span class="muted">—</span>') : '') +
+      '</td><td class="right">' + fmt(p.custoTotal, tab) +
+      (colunasReal ? '</td><td class="right">' + (p.valorAtualReal !== null ? fmt(p.valorAtualReal, "BRL") : '<span class="muted">—</span>') : '') +
       '</td><td class="right">' + (p.precoAtual !== null ? fmt(p.precoAtual, tab) : '<span class="muted">—</span>') +
       '</td><td class="right">' + (p.valorAtual !== null ? fmt(p.valorAtual, tab) : '<span class="muted">—</span>') +
       '</td><td class="right">' + (p.dividendosRecebidos > 0 ? fmt(p.dividendosRecebidos, tab) : '<span class="muted">—</span>') +
