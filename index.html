@@ -389,12 +389,40 @@ function renderResumoCompras(){
 
 function renderResumoRF(){
   const total = rendaFixa.reduce((a,r) => a + r.valor, 0);
+
+  let valorAtualTotal = 0, rendimentoTotal = 0, temRendimento = false;
+  let somaTaxaPonderada = 0, somaValorComTaxa = 0;
+  rendaFixa.forEach(r => {
+    const calc = calcularRendimentoRF(r);
+    if(calc){
+      valorAtualTotal += calc.valorAtual;
+      rendimentoTotal += calc.rendimento;
+      temRendimento = true;
+    } else {
+      valorAtualTotal += r.valor;
+    }
+    const taxaAno = parseFloat(r.taxaAno);
+    if(taxaAno){ somaTaxaPonderada += r.valor * taxaAno; somaValorComTaxa += r.valor; }
+  });
+  const taxaMedia = somaValorComTaxa > 0 ? somaTaxaPonderada / somaValorComTaxa : null;
+  const rendimentoPct = total > 0 ? (rendimentoTotal / total) * 100 : null;
+
   document.getElementById("summaryWrap").innerHTML = `
-    <div class="summary" style="grid-template-columns:1fr;">
+    <div class="summary">
       <div class="card">
         <div class="label">Total aplicado em renda fixa</div>
         <div class="value">${fmt(total, "BRL")}</div>
         <div class="hint">${rendaFixa.length} aplicação(ões)</div>
+      </div>
+      <div class="card">
+        <div class="label">Valor atual estimado</div>
+        <div class="value">${temRendimento ? fmt(valorAtualTotal, "BRL") : "—"}</div>
+        <div class="hint">${temRendimento ? "rendimento: " + fmt(rendimentoTotal,"BRL") + " (" + fmtPct(rendimentoPct) + ")" : "sem taxa ao ano informada"}</div>
+      </div>
+      <div class="card">
+        <div class="label">Taxa média ponderada</div>
+        <div class="value">${taxaMedia !== null ? taxaMedia.toFixed(2) + "% a.a." : "—"}</div>
+        <div class="hint">ponderada pelo valor aplicado</div>
       </div>
     </div>`;
 }
@@ -608,7 +636,8 @@ function calcularRendimentoRF(r){
   const diasDecorridos = Math.max(0, Math.floor((agora - dataAplicacao) / (1000*60*60*24)));
   const valorAtual = r.valor * Math.pow(1 + taxaAno/100, diasDecorridos/365);
   const rendimento = valorAtual - r.valor;
-  return { diasDecorridos, valorAtual, rendimento };
+  const rendimentoDia = valorAtual * (Math.pow(1 + taxaAno/100, 1/365) - 1);
+  return { diasDecorridos, valorAtual, rendimento, rendimentoDia };
 }
 
 function agregarRendaFixaPorNome(lista){
@@ -616,10 +645,10 @@ function agregarRendaFixaPorNome(lista){
   lista.forEach(r => {
     const chaveTaxa = r.taxaAno || r.taxa || "";
     const chave = r.tipo + "|" + r.nome + "|" + chaveTaxa;
-    if(!mapa[chave]) mapa[chave] = { tipo: r.tipo, nome: r.nome, taxaLabel: r.taxa, taxaAnoLabel: r.taxaAno, valorTotal:0, rendimentoTotal:0, temRendimento:false, vencimentos: new Set() };
+    if(!mapa[chave]) mapa[chave] = { tipo: r.tipo, nome: r.nome, taxaLabel: r.taxa, taxaAnoLabel: r.taxaAno, valorTotal:0, rendimentoTotal:0, rendimentoDiaTotal:0, temRendimento:false, vencimentos: new Set() };
     mapa[chave].valorTotal += r.valor;
     const calc = calcularRendimentoRF(r);
-    if(calc){ mapa[chave].rendimentoTotal += calc.rendimento; mapa[chave].temRendimento = true; }
+    if(calc){ mapa[chave].rendimentoTotal += calc.rendimento; mapa[chave].rendimentoDiaTotal += calc.rendimentoDia; mapa[chave].temRendimento = true; }
     if(r.vencimento) mapa[chave].vencimentos.add(r.vencimento);
   });
   return Object.values(mapa).map(g => ({
@@ -637,11 +666,12 @@ function renderRF(){
   }
   const consolidado = agregarRendaFixaPorNome(rendaFixa).sort((a,b) => b.valorTotal - a.valorTotal);
   let html = '<h3>Posições consolidadas</h3><table><thead><tr><th>Tipo</th><th>Nome</th><th class="right">Valor aplicado</th>' +
-    '<th class="right">Rendimento (estim.)</th><th class="right">Valor atual (estim.)</th><th>Vencimento</th></tr></thead><tbody>';
+    '<th class="right">Rendimento hoje</th><th class="right">Rendimento (estim.)</th><th class="right">Valor atual (estim.)</th><th>Vencimento</th></tr></thead><tbody>';
   consolidado.forEach(g => {
     html += '<tr><td>' + g.tipo + '</td><td><b>' + g.nome + '</b>' +
       (g.taxaAnoLabel ? ' <span class="muted">(' + g.taxaAnoLabel + '%a.a.)</span>' : (g.taxaLabel ? ' <span class="muted">(' + g.taxaLabel + ')</span>' : '')) +
       '</td><td class="right">' + fmt(g.valorTotal,"BRL") +
+      '</td><td class="right pos">' + (g.temRendimento ? fmt(g.rendimentoDiaTotal,"BRL") : '<span class="muted">—</span>') +
       '</td><td class="right pos">' + (g.temRendimento ? fmt(g.rendimentoTotal,"BRL") : '<span class="muted">—</span>') +
       '</td><td class="right">' + (g.temRendimento ? fmt(g.valorAtualTotal,"BRL") : '<span class="muted">—</span>') +
       '</td><td>' + g.vencimentoTexto + '</td></tr>';
