@@ -112,6 +112,7 @@
     <div><label>Nome / emissor</label><input id="rf_nome" placeholder="Banco XP"></div>
     <div><label>Valor aplicado</label><input type="number" step="0.01" id="rf_valor" placeholder="5000"></div>
     <div><label>Taxa</label><input id="rf_taxa" placeholder="110% CDI"></div>
+    <div><label>Taxa ao ano (%)</label><input type="number" step="0.01" id="rf_taxaAno" placeholder="12.5"></div>
     <div><label>Aplicação</label><input type="date" id="rf_dataAplicacao"></div>
     <div><label>Vencimento</label><input type="date" id="rf_vencimento"></div>
     <div style="grid-column: span 6; display:flex; gap:6px;">
@@ -598,6 +599,17 @@ function cancelarEdicaoCompra(){
 
 /* ===================== RENDA FIXA ===================== */
 
+function calcularRendimentoRF(r){
+  const taxaAno = parseFloat(r.taxaAno);
+  if(!taxaAno || !r.dataAplicacao) return null;
+  const dataAplicacao = new Date(r.dataAplicacao + "T00:00:00");
+  const agora = new Date();
+  const diasDecorridos = Math.max(0, Math.floor((agora - dataAplicacao) / (1000*60*60*24)));
+  const valorAtual = r.valor * Math.pow(1 + taxaAno/100, diasDecorridos/365);
+  const rendimento = valorAtual - r.valor;
+  return { diasDecorridos, valorAtual, rendimento };
+}
+
 function renderRF(){
   const wrap = document.getElementById("rfWrap");
   if(rendaFixa.length === 0){
@@ -605,14 +617,20 @@ function renderRF(){
     return;
   }
   const ordenado = [...rendaFixa].sort((a,b) => a.dataAplicacao < b.dataAplicacao ? 1 : -1);
-  let html = '<table><thead><tr><th>Tipo</th><th>Nome</th><th class="right">Valor</th><th>Taxa</th><th>Vencimento</th><th></th></tr></thead><tbody>';
+  let html = '<table><thead><tr><th>Tipo</th><th>Nome</th><th class="right">Valor aplicado</th><th>Taxa</th>' +
+    '<th class="right">Rendimento (estim.)</th><th class="right">Valor atual (estim.)</th><th>Vencimento</th><th></th></tr></thead><tbody>';
   ordenado.forEach(r => {
+    const calc = calcularRendimentoRF(r);
     html += '<tr><td>' + r.tipo + '</td><td><b>' + r.nome + '</b></td><td class="right">' + fmt(r.valor,"BRL") +
-      '</td><td>' + (r.taxa || "—") + '</td><td>' + (r.vencimento || "—") + '</td><td class="right">' +
+      '</td><td>' + (r.taxa || "—") + (r.taxaAno ? ' <span class="muted">(' + r.taxaAno + '%a.a.)</span>' : '') +
+      '</td><td class="right pos">' + (calc ? fmt(calc.rendimento,"BRL") : '<span class="muted">—</span>') +
+      '</td><td class="right">' + (calc ? fmt(calc.valorAtual,"BRL") : '<span class="muted">—</span>') +
+      '</td><td>' + (r.vencimento || "—") + '</td><td class="right">' +
       '<button class="edit" data-id="' + r.id + '">✏️</button>' +
       '<button class="del" data-id="' + r.id + '">✕</button></td></tr>';
   });
   html += '</tbody></table>';
+  html += '<p style="font-size:11px; color:#aaa; margin-top:-12px;">Rendimento estimado com taxa fixa ao ano, sem considerar IR/IOF. Só aparece se "Taxa ao ano (%)" for preenchida.</p>';
   wrap.innerHTML = html;
   wrap.querySelectorAll(".del").forEach(b => b.addEventListener("click", async () => {
     rendaFixa = rendaFixa.filter(r => r.id !== b.dataset.id);
@@ -630,6 +648,7 @@ function iniciarEdicaoRF(id){
   document.getElementById("rf_nome").value = r.nome;
   document.getElementById("rf_valor").value = r.valor;
   document.getElementById("rf_taxa").value = r.taxa;
+  document.getElementById("rf_taxaAno").value = r.taxaAno || "";
   document.getElementById("rf_dataAplicacao").value = r.dataAplicacao;
   document.getElementById("rf_vencimento").value = r.vencimento;
   const btn = document.getElementById("rf_submitBtn");
@@ -641,7 +660,7 @@ function cancelarEdicaoRF(){
   editando = { tipo: null, id: null };
   document.getElementById("rf_id").value = "";
   document.getElementById("rf_nome").value = ""; document.getElementById("rf_valor").value = "";
-  document.getElementById("rf_taxa").value = ""; document.getElementById("rf_vencimento").value = "";
+  document.getElementById("rf_taxa").value = ""; document.getElementById("rf_taxaAno").value = ""; document.getElementById("rf_vencimento").value = "";
   document.getElementById("rf_dataAplicacao").value = hoje();
   const btn = document.getElementById("rf_submitBtn");
   btn.textContent = "+ Adicionar aplicação"; btn.classList.remove("editing");
@@ -781,14 +800,15 @@ document.getElementById("formRF").addEventListener("submit", async (e) => {
   if(!nome || !valor) return;
   const tipo = document.getElementById("rf_tipo").value;
   const taxa = document.getElementById("rf_taxa").value;
+  const taxaAno = document.getElementById("rf_taxaAno").value;
   const dataAplicacao = document.getElementById("rf_dataAplicacao").value;
   const vencimento = document.getElementById("rf_vencimento").value;
 
   if(editando.tipo === "rf" && editando.id){
     const idx = rendaFixa.findIndex(r => r.id === editando.id);
-    if(idx > -1) rendaFixa[idx] = { id: editando.id, tipo, nome, valor, taxa, dataAplicacao, vencimento };
+    if(idx > -1) rendaFixa[idx] = { id: editando.id, tipo, nome, valor, taxa, taxaAno, dataAplicacao, vencimento };
   } else {
-    rendaFixa.push({ id: Date.now().toString(), tipo, nome, valor, taxa, dataAplicacao, vencimento });
+    rendaFixa.push({ id: Date.now().toString(), tipo, nome, valor, taxa, taxaAno, dataAplicacao, vencimento });
   }
   cancelarEdicaoRF();
   render();
