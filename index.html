@@ -187,6 +187,7 @@ let cotacoes = {};
 let cambio = { hoje: null, porData: {} };
 let tab = "BRL";
 let historicoAberto = false;
+let histRFAberto = false;
 let divHistoricoAberto = false;
 let agruparPor = "categoria"; // "categoria" | "ticker"
 let incluirRF = false;
@@ -610,27 +611,67 @@ function calcularRendimentoRF(r){
   return { diasDecorridos, valorAtual, rendimento };
 }
 
+function agregarRendaFixaPorNome(lista){
+  const mapa = {};
+  lista.forEach(r => {
+    const chaveTaxa = r.taxaAno || r.taxa || "";
+    const chave = r.tipo + "|" + r.nome + "|" + chaveTaxa;
+    if(!mapa[chave]) mapa[chave] = { tipo: r.tipo, nome: r.nome, taxaLabel: r.taxa, taxaAnoLabel: r.taxaAno, valorTotal:0, rendimentoTotal:0, temRendimento:false, vencimentos: new Set() };
+    mapa[chave].valorTotal += r.valor;
+    const calc = calcularRendimentoRF(r);
+    if(calc){ mapa[chave].rendimentoTotal += calc.rendimento; mapa[chave].temRendimento = true; }
+    if(r.vencimento) mapa[chave].vencimentos.add(r.vencimento);
+  });
+  return Object.values(mapa).map(g => ({
+    ...g,
+    valorAtualTotal: g.valorTotal + g.rendimentoTotal,
+    vencimentoTexto: g.vencimentos.size === 0 ? "—" : g.vencimentos.size === 1 ? [...g.vencimentos][0] : "vários"
+  }));
+}
+
 function renderRF(){
   const wrap = document.getElementById("rfWrap");
   if(rendaFixa.length === 0){
     wrap.innerHTML = '<div class="empty">Nenhuma aplicação em renda fixa ainda.</div>';
     return;
   }
+  const consolidado = agregarRendaFixaPorNome(rendaFixa).sort((a,b) => b.valorTotal - a.valorTotal);
+  let html = '<h3>Posições consolidadas</h3><table><thead><tr><th>Tipo</th><th>Nome</th><th class="right">Valor aplicado</th>' +
+    '<th class="right">Rendimento (estim.)</th><th class="right">Valor atual (estim.)</th><th>Vencimento</th></tr></thead><tbody>';
+  consolidado.forEach(g => {
+    html += '<tr><td>' + g.tipo + '</td><td><b>' + g.nome + '</b>' +
+      (g.taxaAnoLabel ? ' <span class="muted">(' + g.taxaAnoLabel + '%a.a.)</span>' : (g.taxaLabel ? ' <span class="muted">(' + g.taxaLabel + ')</span>' : '')) +
+      '</td><td class="right">' + fmt(g.valorTotal,"BRL") +
+      '</td><td class="right pos">' + (g.temRendimento ? fmt(g.rendimentoTotal,"BRL") : '<span class="muted">—</span>') +
+      '</td><td class="right">' + (g.temRendimento ? fmt(g.valorAtualTotal,"BRL") : '<span class="muted">—</span>') +
+      '</td><td>' + g.vencimentoTexto + '</td></tr>';
+  });
+  html += '</tbody></table>';
+  html += '<p style="font-size:11px; color:#aaa; margin-top:-12px; margin-bottom:16px;">Rendimento estimado com taxa fixa ao ano por aporte, sem considerar IR/IOF.</p>';
+
+  html += '<button class="toggle-hist" id="toggleHistRF">▾ Histórico de aportes (' + rendaFixa.length + ')</button><div id="historicoRFWrap" style="display:none;"></div>';
+  wrap.innerHTML = html;
+
+  document.getElementById("toggleHistRF").addEventListener("click", () => { histRFAberto = !histRFAberto; renderHistoricoRF(); });
+  renderHistoricoRF();
+}
+
+function renderHistoricoRF(){
+  const btn = document.getElementById("toggleHistRF");
+  const wrap = document.getElementById("historicoRFWrap");
+  if(!btn || !wrap) return;
+  btn.textContent = (histRFAberto ? "▴ " : "▾ ") + "Histórico de aportes (" + rendaFixa.length + ")";
+  if(!histRFAberto){ wrap.innerHTML = ""; wrap.style.display = "none"; return; }
+  wrap.style.display = "block";
   const ordenado = [...rendaFixa].sort((a,b) => a.dataAplicacao < b.dataAplicacao ? 1 : -1);
-  let html = '<table><thead><tr><th>Tipo</th><th>Nome</th><th class="right">Valor aplicado</th><th>Taxa</th>' +
-    '<th class="right">Rendimento (estim.)</th><th class="right">Valor atual (estim.)</th><th>Vencimento</th><th></th></tr></thead><tbody>';
+  let html = '<table><thead><tr><th>Data aporte</th><th>Tipo</th><th>Nome</th><th class="right">Valor</th><th>Taxa</th><th></th></tr></thead><tbody>';
   ordenado.forEach(r => {
-    const calc = calcularRendimentoRF(r);
-    html += '<tr><td>' + r.tipo + '</td><td><b>' + r.nome + '</b></td><td class="right">' + fmt(r.valor,"BRL") +
-      '</td><td>' + (r.taxa || "—") + (r.taxaAno ? ' <span class="muted">(' + r.taxaAno + '%a.a.)</span>' : '') +
-      '</td><td class="right pos">' + (calc ? fmt(calc.rendimento,"BRL") : '<span class="muted">—</span>') +
-      '</td><td class="right">' + (calc ? fmt(calc.valorAtual,"BRL") : '<span class="muted">—</span>') +
-      '</td><td>' + (r.vencimento || "—") + '</td><td class="right">' +
+    html += '<tr><td>' + r.dataAplicacao + '</td><td>' + r.tipo + '</td><td>' + r.nome + '</td><td class="right">' + fmt(r.valor,"BRL") +
+      '</td><td>' + (r.taxa || "—") + (r.taxaAno ? ' <span class="muted">(' + r.taxaAno + '%a.a.)</span>' : '') + '</td><td class="right">' +
       '<button class="edit" data-id="' + r.id + '">✏️</button>' +
       '<button class="del" data-id="' + r.id + '">✕</button></td></tr>';
   });
   html += '</tbody></table>';
-  html += '<p style="font-size:11px; color:#aaa; margin-top:-12px;">Rendimento estimado com taxa fixa ao ano, sem considerar IR/IOF. Só aparece se "Taxa ao ano (%)" for preenchida.</p>';
   wrap.innerHTML = html;
   wrap.querySelectorAll(".del").forEach(b => b.addEventListener("click", async () => {
     rendaFixa = rendaFixa.filter(r => r.id !== b.dataset.id);
