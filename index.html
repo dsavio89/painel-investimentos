@@ -113,7 +113,7 @@
     <div><label>Valor aplicado</label><input type="number" step="0.01" id="rf_valor" placeholder="5000"></div>
     <div><label>Taxa</label><input id="rf_taxa" placeholder="110% CDI"></div>
     <div><label>Taxa ao ano (%)</label><input type="number" step="0.01" id="rf_taxaAno" placeholder="12.5"></div>
-    <div><label>Aplicação</label><input type="date" id="rf_dataAplicacao"></div>
+    <div><label>Aplicação</label><input type="date" id="rf_dataAplicacao" required></div>
     <div><label>Vencimento</label><input type="date" id="rf_vencimento"></div>
     <div style="grid-column: span 6; display:flex; gap:6px;">
       <button type="submit" class="add" id="rf_submitBtn" style="flex:1;">+ Adicionar aplicação</button>
@@ -121,6 +121,23 @@
     </div>
   </form>
   <div id="rfWrap"></div>
+
+  <div class="subsection">
+    <h3>Ajustes de taxa (ex: mudança da Selic/CDI)</h3>
+    <p style="font-size:11px; color:#aaa; margin-top:-4px;">
+      Registra que, a partir de uma data, a taxa de um CDB/aplicação mudou — sem reescrever o rendimento já calculado antes dessa data.
+    </p>
+    <form id="formAjusteTaxa">
+      <input type="hidden" id="at_id">
+      <div><label>Nome (igual ao lançamento)</label><input id="at_nome" placeholder="Nubank Turbo Croma"></div>
+      <div><label>Vigência a partir de</label><input type="date" id="at_dataVigencia"></div>
+      <div><label>Nova taxa ao ano (%)</label><input type="number" step="0.01" id="at_taxaAno" placeholder="13.2"></div>
+      <div style="display:flex; gap:6px;">
+        <button type="submit" class="add" id="at_submitBtn">+ Add</button>
+      </div>
+    </form>
+    <div id="ajustesTaxaWrap"></div>
+  </div>
 </div>
 
 <div id="divSection" style="display:none;">
@@ -182,6 +199,7 @@ const PALETA_TICKERS = ["#0F6E56","#639922","#185FA5","#7F77DD","#c98a2c","#e07a
 
 let compras = [];
 let rendaFixa = [];
+let ajustesTaxaRF = [];
 let dividendos = [];
 let cotacoes = {};
 let cambio = { hoje: null, porData: {} };
@@ -239,6 +257,7 @@ async function loadFromSheet(){
     const data = await res.json();
     compras = (data.compras || []).map(c => ({ ...c, id: String(c.id), quantidade: Number(c.quantidade), preco: Number(c.preco) }));
     rendaFixa = (data.rendaFixa || []).map(r => ({ ...r, id: String(r.id), valor: Number(r.valor) }));
+    ajustesTaxaRF = (data.ajustesTaxaRF || []).map(a => ({ ...a, id: String(a.id), taxaAno: Number(a.taxaAno) }));
     dividendos = (data.dividendos || []).map(d => ({ ...d, id: String(d.id), valor: Number(d.valor), valorUnitario: Number(d.valorUnitario) || 0 }));
     cotacoes = data.cotacoes || {};
     cambio = data.cambio || { hoje: null, porData: {} };
@@ -259,7 +278,7 @@ async function saveToSheet(){
     const res = await fetch(APPS_SCRIPT_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ compras, rendaFixa, dividendos })
+      body: JSON.stringify({ compras, rendaFixa, ajustesTaxaRF, dividendos })
     });
     const text = await res.text();
     let ok = false;
@@ -332,7 +351,7 @@ function render(){
   renderChartControls();
   renderChart();
 
-  if(tab === "RF") renderRF();
+  if(tab === "RF"){ renderRF(); renderAjustesTaxa(); }
   else if(tab === "DIV") { renderDivAcumulados(); renderDiv(); }
   else { renderPosicoes(); renderHistorico(); }
 }
@@ -629,15 +648,39 @@ function cancelarEdicaoCompra(){
 /* ===================== RENDA FIXA ===================== */
 
 function calcularRendimentoRF(r){
-  const taxaAno = parseFloat(r.taxaAno);
-  if(!taxaAno || !r.dataAplicacao) return null;
-  const dataAplicacao = new Date(r.dataAplicacao + "T00:00:00");
-  const agora = new Date();
-  const diasDecorridos = Math.max(0, Math.floor((agora - dataAplicacao) / (1000*60*60*24)));
-  const valorAtual = r.valor * Math.pow(1 + taxaAno/100, diasDecorridos/365);
+  const taxaInicial = parseFloat(r.taxaAno);
+  if(!taxaInicial || !r.dataAplicacao) return null;
+
+  // Monta a linha do tempo de taxas: começa com a taxa do aporte, e cada
+  // ajuste (do mesmo nome, com vigência depois da data de aplicação) abre
+  // um novo período com a taxa nova a partir daquela data.
+  const ajustes = ajustesTaxaRF
+    .filter(a => a.nome === r.nome && a.dataVigencia > r.dataAplicacao)
+    .sort((a,b) => a.dataVigencia < b.dataVigencia ? -1 : 1);
+
+  const periodos = [{ inicio: r.dataAplicacao, taxaAno: taxaInicial }];
+  ajustes.forEach(a => periodos.push({ inicio: a.dataVigencia, taxaAno: a.taxaAno }));
+
+  const hoje = new Date();
+  let valorAtual = r.valor;
+  let taxaAtual = taxaInicial;
+
+  for(let i = 0; i < periodos.length; i++){
+    const inicio = new Date(periodos[i].inicio + "T00:00:00");
+    const fim = (i+1 < periodos.length) ? new Date(periodos[i+1].inicio + "T00:00:00") : hoje;
+    if(fim <= inicio) continue;
+    const dias = Math.max(0, (fim - inicio) / (1000*60*60*24));
+    const taxaDoPeriodo = periodos[i].taxaAno;
+    if(taxaDoPeriodo){
+      valorAtual *= Math.pow(1 + taxaDoPeriodo/100, dias/365);
+      taxaAtual = taxaDoPeriodo;
+    }
+  }
+
+  const diasDecorridos = Math.max(0, Math.floor((hoje - new Date(r.dataAplicacao + "T00:00:00")) / (1000*60*60*24)));
   const rendimento = valorAtual - r.valor;
-  const rendimentoDia = valorAtual * (Math.pow(1 + taxaAno/100, 1/365) - 1);
-  return { diasDecorridos, valorAtual, rendimento, rendimentoDia };
+  const rendimentoDia = valorAtual * (Math.pow(1 + taxaAtual/100, 1/365) - 1);
+  return { diasDecorridos, valorAtual, rendimento, rendimentoDia, taxaAtual };
 }
 
 function agregarRendaFixaPorNome(lista){
@@ -708,6 +751,26 @@ function renderHistoricoRF(){
     render(); await saveToSheet();
   }));
   wrap.querySelectorAll(".edit").forEach(b => b.addEventListener("click", () => iniciarEdicaoRF(b.dataset.id)));
+}
+
+function renderAjustesTaxa(){
+  const wrap = document.getElementById("ajustesTaxaWrap");
+  if(ajustesTaxaRF.length === 0){
+    wrap.innerHTML = '<div class="empty">Nenhum ajuste de taxa registrado ainda.</div>';
+    return;
+  }
+  const ordenado = [...ajustesTaxaRF].sort((a,b) => a.dataVigencia < b.dataVigencia ? 1 : -1);
+  let html = '<table><thead><tr><th>Nome</th><th>Vigência a partir de</th><th class="right">Nova taxa</th><th></th></tr></thead><tbody>';
+  ordenado.forEach(a => {
+    html += '<tr><td>' + a.nome + '</td><td>' + a.dataVigencia + '</td><td class="right">' + a.taxaAno + '% a.a.' +
+      '</td><td class="right"><button class="del" data-id="' + a.id + '">✕</button></td></tr>';
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+  wrap.querySelectorAll(".del").forEach(b => b.addEventListener("click", async () => {
+    ajustesTaxaRF = ajustesTaxaRF.filter(a => a.id !== b.dataset.id);
+    render(); await saveToSheet();
+  }));
 }
 
 function iniciarEdicaoRF(id){
@@ -886,6 +949,20 @@ document.getElementById("formRF").addEventListener("submit", async (e) => {
   await saveToSheet();
 });
 document.getElementById("rf_cancelBtn").addEventListener("click", () => { cancelarEdicaoRF(); render(); });
+
+document.getElementById("formAjusteTaxa").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const nome = document.getElementById("at_nome").value.trim();
+  const dataVigencia = document.getElementById("at_dataVigencia").value;
+  const taxaAno = parseFloat(document.getElementById("at_taxaAno").value);
+  if(!nome || !dataVigencia || !taxaAno) return;
+  ajustesTaxaRF.push({ id: Date.now().toString(), nome, dataVigencia, taxaAno });
+  document.getElementById("at_nome").value = "";
+  document.getElementById("at_dataVigencia").value = "";
+  document.getElementById("at_taxaAno").value = "";
+  render();
+  await saveToSheet();
+});
 
 document.getElementById("d_data").value = hoje();
 ["d_categoria","d_ticker","d_valorUnitario"].forEach(id => {
