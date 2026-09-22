@@ -138,6 +138,27 @@
     </form>
     <div id="ajustesTaxaWrap"></div>
   </div>
+
+  <div class="subsection">
+    <h3>Resgates</h3>
+    <p style="font-size:11px; color:#aaa; margin-top:-4px;">
+      IR estimado usando a data do aporte mais antigo daquele nome (lógica "mais antigo sai primeiro") — é uma estimativa pra planejamento, não o cálculo oficial da instituição.
+    </p>
+    <form id="formResgate">
+      <input type="hidden" id="rg_id">
+      <div><label>Nome (igual ao lançamento)</label><input id="rg_nome" placeholder="Nubank Turbo Croma"></div>
+      <div><label>Data do resgate</label><input type="date" id="rg_data"></div>
+      <div><label>Valor bruto resgatado</label><input type="number" step="0.01" id="rg_valorBruto" placeholder="1000.00"></div>
+      <div>
+        <label>IR estimado</label>
+        <div id="rg_irCalculado" style="font-size:14px; padding:6px 8px; background:#fff; border:1px solid #ddd; border-radius:6px; color:#333;">—</div>
+      </div>
+      <div style="display:flex; gap:6px;">
+        <button type="submit" class="add" id="rg_submitBtn">+ Add</button>
+      </div>
+    </form>
+    <div id="resgatesWrap"></div>
+  </div>
 </div>
 
 <div id="divSection" style="display:none;">
@@ -200,6 +221,7 @@ const PALETA_TICKERS = ["#0F6E56","#639922","#185FA5","#7F77DD","#c98a2c","#e07a
 let compras = [];
 let rendaFixa = [];
 let ajustesTaxaRF = [];
+let resgatesRF = [];
 let dividendos = [];
 let cotacoes = {};
 let cambio = { hoje: null, porData: {} };
@@ -258,6 +280,7 @@ async function loadFromSheet(){
     compras = (data.compras || []).map(c => ({ ...c, id: String(c.id), quantidade: Number(c.quantidade), preco: Number(c.preco) }));
     rendaFixa = (data.rendaFixa || []).map(r => ({ ...r, id: String(r.id), valor: Number(r.valor) }));
     ajustesTaxaRF = (data.ajustesTaxaRF || []).map(a => ({ ...a, id: String(a.id), taxaAno: Number(a.taxaAno) }));
+    resgatesRF = (data.resgatesRF || []).map(r => ({ ...r, id: String(r.id), valorBruto: Number(r.valorBruto) }));
     dividendos = (data.dividendos || []).map(d => ({ ...d, id: String(d.id), valor: Number(d.valor), valorUnitario: Number(d.valorUnitario) || 0 }));
     cotacoes = data.cotacoes || {};
     cambio = data.cambio || { hoje: null, porData: {} };
@@ -278,7 +301,7 @@ async function saveToSheet(){
     const res = await fetch(APPS_SCRIPT_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ compras, rendaFixa, ajustesTaxaRF, dividendos })
+      body: JSON.stringify({ compras, rendaFixa, ajustesTaxaRF, resgatesRF, dividendos })
     });
     const text = await res.text();
     let ok = false;
@@ -351,7 +374,7 @@ function render(){
   renderChartControls();
   renderChart();
 
-  if(tab === "RF"){ renderRF(); renderAjustesTaxa(); }
+  if(tab === "RF"){ renderRF(); renderAjustesTaxa(); renderResgates(); }
   else if(tab === "DIV") { renderDivAcumulados(); renderDiv(); }
   else { renderPosicoes(); renderHistorico(); }
 }
@@ -683,6 +706,56 @@ function calcularRendimentoRF(r){
   return { diasDecorridos, valorAtual, rendimento, rendimentoDia, taxaAtual };
 }
 
+function faixaIR(dias, tipo){
+  if(tipo === "LCI/LCA") return 0;
+  if(dias <= 180) return 22.5;
+  if(dias <= 360) return 20;
+  if(dias <= 720) return 17.5;
+  return 15;
+}
+
+// Posição agregada de TODOS os aportes de um nome (independente da taxa),
+// numa data específica — usada pra estimar rendimento/IR de um resgate.
+function posicaoNaData(nome, dataRef){
+  const aportes = rendaFixa.filter(r => r.nome === nome);
+  if(aportes.length === 0) return null;
+  let valorAplicado = 0, valorNaData = 0;
+  let dataMaisAntiga = null;
+  aportes.forEach(r => {
+    valorAplicado += r.valor;
+    if(!dataMaisAntiga || r.dataAplicacao < dataMaisAntiga) dataMaisAntiga = r.dataAplicacao;
+    const taxaInicial = parseFloat(r.taxaAno);
+    if(!taxaInicial || !r.dataAplicacao){ valorNaData += r.valor; return; }
+    const ajustes = ajustesTaxaRF
+      .filter(a => a.nome === r.nome && a.dataVigencia > r.dataAplicacao && a.dataVigencia <= dataRef)
+      .sort((a,b) => a.dataVigencia < b.dataVigencia ? -1 : 1);
+    const periodos = [{ inicio: r.dataAplicacao, taxaAno: taxaInicial }];
+    ajustes.forEach(a => periodos.push({ inicio: a.dataVigencia, taxaAno: a.taxaAno }));
+    const fimRef = new Date(dataRef + "T00:00:00");
+    let valor = r.valor;
+    for(let i=0;i<periodos.length;i++){
+      const inicio = new Date(periodos[i].inicio + "T00:00:00");
+      const fim = (i+1<periodos.length) ? new Date(periodos[i+1].inicio + "T00:00:00") : fimRef;
+      if(fim <= inicio) continue;
+      const dias = Math.max(0,(fim-inicio)/(1000*60*60*24));
+      if(periodos[i].taxaAno) valor *= Math.pow(1+periodos[i].taxaAno/100, dias/365);
+    }
+    valorNaData += valor;
+  });
+  return { valorAplicado, valorNaData, rendimento: valorNaData - valorAplicado, dataMaisAntiga, tipo: aportes[0].tipo };
+}
+
+function estimarIRResgate(nome, dataResgate, valorBruto){
+  const pos = posicaoNaData(nome, dataResgate);
+  if(!pos || pos.valorNaData <= 0) return { taxaIR: 0, valorIR: 0, valorLiquido: valorBruto };
+  const dias = Math.max(0, Math.floor((new Date(dataResgate+"T00:00:00") - new Date(pos.dataMaisAntiga+"T00:00:00")) / (1000*60*60*24)));
+  const taxaIR = faixaIR(dias, pos.tipo);
+  const fracaoLucro = pos.rendimento > 0 ? pos.rendimento / pos.valorNaData : 0;
+  const lucroProporcional = valorBruto * fracaoLucro;
+  const valorIR = lucroProporcional * (taxaIR/100);
+  return { taxaIR, valorIR, valorLiquido: valorBruto - valorIR, dias };
+}
+
 function agregarRendaFixaPorNome(lista){
   const mapa = {};
   lista.forEach(r => {
@@ -694,11 +767,17 @@ function agregarRendaFixaPorNome(lista){
     if(calc){ mapa[chave].rendimentoTotal += calc.rendimento; mapa[chave].rendimentoDiaTotal += calc.rendimentoDia; mapa[chave].temRendimento = true; }
     if(r.vencimento) mapa[chave].vencimentos.add(r.vencimento);
   });
-  return Object.values(mapa).map(g => ({
-    ...g,
-    valorAtualTotal: g.valorTotal + g.rendimentoTotal,
-    vencimentoTexto: g.vencimentos.size === 0 ? "—" : g.vencimentos.size === 1 ? [...g.vencimentos][0] : "vários"
-  }));
+  return Object.values(mapa).map(g => {
+    const resgatadoTotal = resgatesRF.filter(res => res.nome === g.nome).reduce((a,res) => a + res.valorBruto, 0);
+    const valorAtualTotal = g.valorTotal + g.rendimentoTotal;
+    return {
+      ...g,
+      valorAtualTotal,
+      resgatadoTotal,
+      saldoLiquido: valorAtualTotal - resgatadoTotal,
+      vencimentoTexto: g.vencimentos.size === 0 ? "—" : g.vencimentos.size === 1 ? [...g.vencimentos][0] : "vários"
+    };
+  });
 }
 
 function renderRF(){
@@ -709,7 +788,8 @@ function renderRF(){
   }
   const consolidado = agregarRendaFixaPorNome(rendaFixa).sort((a,b) => b.valorTotal - a.valorTotal);
   let html = '<h3>Posições consolidadas</h3><table><thead><tr><th>Tipo</th><th>Nome</th><th class="right">Valor aplicado</th>' +
-    '<th class="right">Rendimento hoje</th><th class="right">Rendimento (estim.)</th><th class="right">Valor atual (estim.)</th><th>Vencimento</th></tr></thead><tbody>';
+    '<th class="right">Rendimento hoje</th><th class="right">Rendimento (estim.)</th><th class="right">Valor atual (estim.)</th>' +
+    '<th class="right">Resgatado</th><th class="right">Saldo líquido</th><th>Vencimento</th></tr></thead><tbody>';
   consolidado.forEach(g => {
     html += '<tr><td>' + g.tipo + '</td><td><b>' + g.nome + '</b>' +
       (g.taxaAnoLabel ? ' <span class="muted">(' + g.taxaAnoLabel + '%a.a.)</span>' : (g.taxaLabel ? ' <span class="muted">(' + g.taxaLabel + ')</span>' : '')) +
@@ -717,10 +797,12 @@ function renderRF(){
       '</td><td class="right pos">' + (g.temRendimento ? fmt(g.rendimentoDiaTotal,"BRL") : '<span class="muted">—</span>') +
       '</td><td class="right pos">' + (g.temRendimento ? fmt(g.rendimentoTotal,"BRL") : '<span class="muted">—</span>') +
       '</td><td class="right">' + (g.temRendimento ? fmt(g.valorAtualTotal,"BRL") : '<span class="muted">—</span>') +
+      '</td><td class="right neg">' + (g.resgatadoTotal > 0 ? fmt(g.resgatadoTotal,"BRL") : '<span class="muted">—</span>') +
+      '</td><td class="right"><b>' + fmt(g.saldoLiquido,"BRL") + '</b>' +
       '</td><td>' + g.vencimentoTexto + '</td></tr>';
   });
   html += '</tbody></table>';
-  html += '<p style="font-size:11px; color:#aaa; margin-top:-12px; margin-bottom:16px;">Rendimento estimado com taxa fixa ao ano por aporte, sem considerar IR/IOF.</p>';
+  html += '<p style="font-size:11px; color:#aaa; margin-top:-12px; margin-bottom:16px;">Rendimento estimado com taxa fixa ao ano por aporte, sem considerar IR/IOF. "Resgatado" soma todos os resgates lançados pra esse nome.</p>';
 
   html += '<button class="toggle-hist" id="toggleHistRF">▾ Histórico de aportes (' + rendaFixa.length + ')</button><div id="historicoRFWrap" style="display:none;"></div>';
   wrap.innerHTML = html;
@@ -769,6 +851,39 @@ function renderAjustesTaxa(){
   wrap.innerHTML = html;
   wrap.querySelectorAll(".del").forEach(b => b.addEventListener("click", async () => {
     ajustesTaxaRF = ajustesTaxaRF.filter(a => a.id !== b.dataset.id);
+    render(); await saveToSheet();
+  }));
+}
+
+function recalcularIRResgate(){
+  const nome = document.getElementById("rg_nome").value.trim();
+  const data = document.getElementById("rg_data").value;
+  const valorBruto = parseFloat(document.getElementById("rg_valorBruto").value) || 0;
+  const el = document.getElementById("rg_irCalculado");
+  if(!nome || !data || !valorBruto){ el.textContent = "—"; return; }
+  const est = estimarIRResgate(nome, data, valorBruto);
+  el.textContent = fmt(est.valorIR,"BRL") + " (" + est.taxaIR + "%) — líquido: " + fmt(est.valorLiquido,"BRL");
+}
+
+function renderResgates(){
+  const wrap = document.getElementById("resgatesWrap");
+  if(resgatesRF.length === 0){
+    wrap.innerHTML = '<div class="empty">Nenhum resgate lançado ainda.</div>';
+    return;
+  }
+  const ordenado = [...resgatesRF].sort((a,b) => a.data < b.data ? 1 : -1);
+  let html = '<table><thead><tr><th>Data</th><th>Nome</th><th class="right">Valor bruto</th><th class="right">IR estimado</th><th class="right">Valor líquido</th><th></th></tr></thead><tbody>';
+  ordenado.forEach(r => {
+    const est = estimarIRResgate(r.nome, r.data, r.valorBruto);
+    html += '<tr><td>' + r.data + '</td><td>' + r.nome + '</td><td class="right">' + fmt(r.valorBruto,"BRL") +
+      '</td><td class="right neg">' + fmt(est.valorIR,"BRL") + ' (' + est.taxaIR + '%)' +
+      '</td><td class="right">' + fmt(est.valorLiquido,"BRL") +
+      '</td><td class="right"><button class="del" data-id="' + r.id + '">✕</button></td></tr>';
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+  wrap.querySelectorAll(".del").forEach(b => b.addEventListener("click", async () => {
+    resgatesRF = resgatesRF.filter(r => r.id !== b.dataset.id);
     render(); await saveToSheet();
   }));
 }
@@ -960,6 +1075,26 @@ document.getElementById("formAjusteTaxa").addEventListener("submit", async (e) =
   document.getElementById("at_nome").value = "";
   document.getElementById("at_dataVigencia").value = "";
   document.getElementById("at_taxaAno").value = "";
+  render();
+  await saveToSheet();
+});
+
+document.getElementById("rg_data").value = hoje();
+["rg_nome","rg_data","rg_valorBruto"].forEach(id => {
+  document.getElementById(id).addEventListener("input", recalcularIRResgate);
+  document.getElementById(id).addEventListener("change", recalcularIRResgate);
+});
+document.getElementById("formResgate").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const nome = document.getElementById("rg_nome").value.trim();
+  const data = document.getElementById("rg_data").value;
+  const valorBruto = parseFloat(document.getElementById("rg_valorBruto").value);
+  if(!nome || !data || !valorBruto) return;
+  resgatesRF.push({ id: Date.now().toString(), nome, data, valorBruto });
+  document.getElementById("rg_nome").value = "";
+  document.getElementById("rg_valorBruto").value = "";
+  document.getElementById("rg_data").value = hoje();
+  document.getElementById("rg_irCalculado").textContent = "—";
   render();
   await saveToSheet();
 });
