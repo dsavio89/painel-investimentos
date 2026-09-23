@@ -448,6 +448,8 @@ function renderResumoRF(){
   });
   const taxaMedia = somaValorComTaxa > 0 ? somaTaxaPonderada / somaValorComTaxa : null;
   const rendimentoPct = total > 0 ? (rendimentoTotal / total) * 100 : null;
+  const totalResgatado = resgatesRF.reduce((a,r) => a + r.valorBruto, 0);
+  const saldoLiquidoTotal = valorAtualTotal - totalResgatado;
 
   document.getElementById("summaryWrap").innerHTML = `
     <div class="summary">
@@ -457,9 +459,9 @@ function renderResumoRF(){
         <div class="hint">${rendaFixa.length} aplicação(ões)</div>
       </div>
       <div class="card">
-        <div class="label">Valor atual estimado</div>
-        <div class="value">${temRendimento ? fmt(valorAtualTotal, "BRL") : "—"}</div>
-        <div class="hint">${temRendimento ? "rendimento: " + fmt(rendimentoTotal,"BRL") + " (" + fmtPct(rendimentoPct) + ")" : "sem taxa ao ano informada"}</div>
+        <div class="label">Saldo líquido atual</div>
+        <div class="value">${temRendimento ? fmt(saldoLiquidoTotal, "BRL") : "—"}</div>
+        <div class="hint">${temRendimento ? "rendimento: " + fmt(rendimentoTotal,"BRL") + " (" + fmtPct(rendimentoPct) + ")" + (totalResgatado>0 ? " · já resgatado: "+fmt(totalResgatado,"BRL") : "") : "sem taxa ao ano informada"}</div>
       </div>
       <div class="card">
         <div class="label">Taxa média ponderada</div>
