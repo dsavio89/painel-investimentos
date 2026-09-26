@@ -778,6 +778,23 @@ function cancelarEdicaoCompra(){
 
 /* ===================== RENDA FIXA ===================== */
 
+// Conta dias úteis (seg-sex) entre duas datas — não considera feriados
+// (aproximação; feriados também não rendem, então o real é levemente menor).
+function diasUteisEntre(inicio, fim){
+  let count = 0;
+  const d = new Date(inicio);
+  while(d < fim){
+    const diaSemana = d.getDay(); // 0 = domingo, 6 = sábado
+    if(diaSemana !== 0 && diaSemana !== 6) count++;
+    d.setDate(d.getDate() + 1);
+  }
+  return count;
+}
+function hojeEhDiaUtil(){
+  const dia = new Date().getDay();
+  return dia !== 0 && dia !== 6;
+}
+
 function calcularRendimentoRF(r){
   const taxaInicial = parseFloat(r.taxaAno);
   if(!taxaInicial || !r.dataAplicacao) return null;
@@ -800,17 +817,17 @@ function calcularRendimentoRF(r){
     const inicio = new Date(periodos[i].inicio + "T00:00:00");
     const fim = (i+1 < periodos.length) ? new Date(periodos[i+1].inicio + "T00:00:00") : hoje;
     if(fim <= inicio) continue;
-    const dias = Math.max(0, (fim - inicio) / (1000*60*60*24));
+    const diasUteis = diasUteisEntre(inicio, fim);
     const taxaDoPeriodo = periodos[i].taxaAno;
     if(taxaDoPeriodo){
-      valorAtual *= Math.pow(1 + taxaDoPeriodo/100, dias/365);
+      valorAtual *= Math.pow(1 + taxaDoPeriodo/100, diasUteis/252);
       taxaAtual = taxaDoPeriodo;
     }
   }
 
   const diasDecorridos = Math.max(0, Math.floor((hoje - new Date(r.dataAplicacao + "T00:00:00")) / (1000*60*60*24)));
   const rendimento = valorAtual - r.valor;
-  const rendimentoDia = valorAtual * (Math.pow(1 + taxaAtual/100, 1/365) - 1);
+  const rendimentoDia = hojeEhDiaUtil() ? valorAtual * (Math.pow(1 + taxaAtual/100, 1/252) - 1) : 0;
   return { diasDecorridos, valorAtual, rendimento, rendimentoDia, taxaAtual };
 }
 
@@ -845,8 +862,8 @@ function posicaoNaData(nome, dataRef){
       const inicio = new Date(periodos[i].inicio + "T00:00:00");
       const fim = (i+1<periodos.length) ? new Date(periodos[i+1].inicio + "T00:00:00") : fimRef;
       if(fim <= inicio) continue;
-      const dias = Math.max(0,(fim-inicio)/(1000*60*60*24));
-      if(periodos[i].taxaAno) valor *= Math.pow(1+periodos[i].taxaAno/100, dias/365);
+      const diasUteis = diasUteisEntre(inicio, fim);
+      if(periodos[i].taxaAno) valor *= Math.pow(1+periodos[i].taxaAno/100, diasUteis/252);
     }
     valorNaData += valor;
   });
