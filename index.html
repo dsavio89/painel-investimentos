@@ -66,17 +66,29 @@
 <div id="saveError" class="save-error" style="display:none;">Não consegui salvar/carregar da planilha agora. Confira sua conexão ou a URL configurada.</div>
 
 <div class="tabs">
-  <button class="tab active" data-tab="BRL">Brasil (R$)</button>
+  <button class="tab active" data-tab="RESUMO">Resumo</button>
+  <button class="tab" data-tab="BRL">Brasil (R$)</button>
   <button class="tab" data-tab="USD">EUA (US$)</button>
   <button class="tab" data-tab="RF">Renda fixa</button>
   <button class="tab" data-tab="DIV">Dividendos</button>
 </div>
 
-<div id="summaryWrap"></div>
+<div id="resumoSection" style="display:block;">
+  <div id="resumoCardsWrap"></div>
+  <div class="chart-panel">
+    <h3 style="margin-bottom:12px;">Distribuição do patrimônio</h3>
+    <div class="chart-box" id="resumoChartWrap"></div>
+  </div>
+  <div id="resumoTabelaWrap"></div>
+</div>
 
-<div class="chart-panel">
-  <div class="chart-controls" id="chartControls"></div>
-  <div class="chart-box" id="pieChartWrap"></div>
+<div id="painelPadraoWrap">
+  <div id="summaryWrap"></div>
+
+  <div class="chart-panel">
+    <div class="chart-controls" id="chartControls"></div>
+    <div class="chart-box" id="pieChartWrap"></div>
+  </div>
 </div>
 
 <div id="compraSection">
@@ -225,7 +237,7 @@ let resgatesRF = [];
 let dividendos = [];
 let cotacoes = {};
 let cambio = { hoje: null, porData: {} };
-let tab = "BRL";
+let tab = "RESUMO";
 let historicoAberto = false;
 let histRFAberto = false;
 let divHistoricoAberto = false;
@@ -355,9 +367,18 @@ function agregarPorTicker(lista){
 
 function render(){
   document.querySelectorAll(".tab").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+
+  document.getElementById("resumoSection").style.display = tab === "RESUMO" ? "block" : "none";
+  document.getElementById("painelPadraoWrap").style.display = tab === "RESUMO" ? "none" : "block";
   document.getElementById("compraSection").style.display = (tab === "BRL" || tab === "USD") ? "block" : "none";
   document.getElementById("rfSection").style.display = tab === "RF" ? "block" : "none";
   document.getElementById("divSection").style.display = tab === "DIV" ? "block" : "none";
+
+  if(tab === "RESUMO"){
+    document.getElementById("subtitle").textContent = "Sua carteira inteira, num só lugar.";
+    renderResumoGeral();
+    return;
+  }
 
   const subtitles = {
     BRL: "Lance cada compra do dia. O preço médio de cada ticker é recalculado automaticamente.",
@@ -549,10 +570,89 @@ function calcularDadosGrafico(){
   return dados;
 }
 
-function renderChart(){
-  const wrap = document.getElementById("pieChartWrap");
-  const dados = calcularDadosGrafico();
-  const moeda = tab === "USD" ? "USD" : "BRL";
+function renderResumoGeral(){
+  const anoAtual = new Date().getFullYear();
+
+  const posBR = agregarPorTicker(compras.filter(c => c.categoria === "Ações BR"));
+  const valorBR = posBR.reduce((a,p) => a + (p.valorAtual !== null ? p.valorAtual : p.custoTotal), 0);
+
+  const posFII = agregarPorTicker(compras.filter(c => c.categoria === "FIIs"));
+  const valorFII = posFII.reduce((a,p) => a + (p.valorAtual !== null ? p.valorAtual : p.custoTotal), 0);
+
+  const posUSD = agregarPorTicker(compras.filter(c => CATEGORIES[c.categoria]?.moeda === "USD"));
+  const valorEUAReal = posUSD.reduce((a,p) => a + (p.valorAtualReal !== null ? p.valorAtualReal : (p.custoTotalReal||0)), 0);
+  const valorEUAUsd = posUSD.reduce((a,p) => a + (p.valorAtual !== null ? p.valorAtual : p.custoTotal), 0);
+
+  const posRF = agregarRendaFixaPorNome(rendaFixa);
+  const saldoRF = posRF.reduce((a,g) => a + g.saldoLiquido, 0);
+
+  const patrimonioTotal = valorBR + valorFII + valorEUAReal + saldoRF;
+
+  const dividendosAno = dividendos.filter(d => new Date(d.data).getFullYear() === anoAtual);
+  const divBRL = dividendosAno.filter(d => CATEGORIES[d.categoria]?.moeda !== "USD").reduce((a,d) => a + d.valor, 0);
+  const divUSD = dividendosAno.filter(d => CATEGORIES[d.categoria]?.moeda === "USD").reduce((a,d) => a + d.valor, 0);
+  const divUSDemReal = cambio.hoje ? divUSD * cambio.hoje : 0;
+  const dividendosAnoTotalReal = divBRL + divUSDemReal;
+
+  const pct = (v) => patrimonioTotal > 0 ? ((v/patrimonioTotal)*100).toFixed(0) : "0";
+
+  document.getElementById("resumoCardsWrap").innerHTML = `
+    <div class="summary" style="grid-template-columns:1fr; margin-bottom:12px;">
+      <div class="card">
+        <div class="label">Patrimônio total estimado</div>
+        <div class="value" style="font-size:28px;">${fmt(patrimonioTotal,"BRL")}</div>
+        <div class="hint">Ações BR + FIIs + EUA (convertido) + Renda Fixa (saldo líquido)</div>
+      </div>
+    </div>
+    <div class="summary" style="grid-template-columns:repeat(4,1fr); margin-bottom:12px;">
+      <div class="card">
+        <div class="label">Ações BR</div>
+        <div class="value">${fmt(valorBR,"BRL")}</div>
+        <div class="hint">${pct(valorBR)}% da carteira</div>
+      </div>
+      <div class="card">
+        <div class="label">FIIs</div>
+        <div class="value">${fmt(valorFII,"BRL")}</div>
+        <div class="hint">${pct(valorFII)}% da carteira</div>
+      </div>
+      <div class="card">
+        <div class="label">EUA (Ações + REITs)</div>
+        <div class="value">${fmt(valorEUAReal,"BRL")}</div>
+        <div class="hint">${fmt(valorEUAUsd,"USD")} · ${pct(valorEUAReal)}% da carteira</div>
+      </div>
+      <div class="card">
+        <div class="label">Renda Fixa</div>
+        <div class="value">${fmt(saldoRF,"BRL")}</div>
+        <div class="hint">${pct(saldoRF)}% da carteira</div>
+      </div>
+    </div>
+    <div class="summary" style="grid-template-columns:1fr;">
+      <div class="card">
+        <div class="label">Dividendos recebidos em ${anoAtual}</div>
+        <div class="value pos">${fmt(dividendosAnoTotalReal,"BRL")}</div>
+        <div class="hint">${divBRL>0 ? fmt(divBRL,"BRL")+" em BR" : ""}${divUSD>0 ? " · "+fmt(divUSD,"USD")+" em EUA" : ""}${(divBRL===0&&divUSD===0) ? "nenhum ainda" : ""}</div>
+      </div>
+    </div>`;
+
+  const dadosGrafico = [
+    { nome:"Ações BR", valor: valorBR, cor: CATEGORIES["Ações BR"].cor },
+    { nome:"FIIs", valor: valorFII, cor: CATEGORIES["FIIs"].cor },
+    { nome:"EUA (Ações+REITs)", valor: valorEUAReal, cor: CATEGORIES["Ações EUA"].cor },
+    { nome:"Renda Fixa", valor: saldoRF, cor: COR_RF_SLICE }
+  ].filter(d => d.valor > 0);
+  desenharPizza("resumoChartWrap", dadosGrafico, "BRL");
+
+  let html = '<h3>Resumo por categoria</h3><table><thead><tr><th>Categoria</th><th class="right">Valor (R$)</th><th class="right">% da carteira</th></tr></thead><tbody>';
+  dadosGrafico.forEach(d => {
+    html += '<tr><td>'+d.nome+'</td><td class="right">'+fmt(d.valor,"BRL")+'</td><td class="right">'+pct(d.valor)+'%</td></tr>';
+  });
+  html += '<tr style="font-weight:700; border-top:2px solid #185FA5;"><td>Total</td><td class="right">'+fmt(patrimonioTotal,"BRL")+'</td><td class="right">100%</td></tr>';
+  html += '</tbody></table>';
+  document.getElementById("resumoTabelaWrap").innerHTML = html;
+}
+
+function desenharPizza(elId, dados, moeda){
+  const wrap = document.getElementById(elId);
   if(dados.length === 0){
     wrap.innerHTML = '<div class="empty" style="padding:0;">Sem dados ainda</div>';
     return;
@@ -583,6 +683,12 @@ function renderChart(){
     return `<div class="item"><span class="dot" style="background:${d.cor}"></span>${d.nome} (${pct}%)</div>`;
   }).join("");
   wrap.innerHTML = `<svg viewBox="0 0 110 110" width="110" height="110">${fatias}</svg><div class="chart-legend">${legenda}</div>`;
+}
+
+function renderChart(){
+  const dados = calcularDadosGrafico();
+  const moeda = tab === "USD" ? "USD" : "BRL";
+  desenharPizza("pieChartWrap", dados, moeda);
 }
 
 /* ===================== COMPRAS ===================== */
